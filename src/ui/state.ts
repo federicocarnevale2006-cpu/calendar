@@ -8,7 +8,7 @@ export type Overlay =
   | { t: "scope"; occ: Occ; action: "edit" | "delete" }
   | { t: "search" }
   | { t: "settings" }
-  | { t: "calendars" }
+  | { t: "calendars"; add?: boolean }
   | { t: "drawer" }
   | { t: "trofeo" };
 

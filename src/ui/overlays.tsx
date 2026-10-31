@@ -390,12 +390,26 @@ export function Search() {
 }
 
 // ------------------------------------------------------------------------------------------------------ calendari
-export function Calendars() {
+export function Calendars({ add: addNow }: { add?: boolean }) {
   const [editing, setEditing] = useState<string | null>(null);
+  const [fresh, setFresh] = useState<string | null>(null);         // calendario appena creato: nome selezionato, pronto da scrivere
   const add = () => {
-    const c: Cal = { id: uuid(), name: "Nuovo calendario", color: PALETTE[(cals.value.length * 3) % PALETTE.length], visible: true, sort: cals.value.length, deleted: false };
+    const used = new Set(cals.value.filter((x) => !x.deleted).map((x) => x.color));
+    const color = PALETTE.find((p) => !used.has(p)) ?? PALETTE[(cals.value.length * 3) % PALETTE.length];
+    const sort = Math.max(-1, ...cals.value.filter((x) => !x.deleted).map((x) => x.sort)) + 1;
+    const c: Cal = { id: uuid(), name: "Nuovo calendario", color, visible: true, sort, deleted: false };
     void saveCal(c);
     setEditing(c.id);
+    setFresh(c.id);
+  };
+  useEffect(() => { if (addNow) add(); }, []);
+  const move = (c: Cal, dir: number) => {
+    const list = visibleCals.value;
+    const i = list.findIndex((x) => x.id === c.id), j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    const order = list.map((x) => x.id);
+    [order[i], order[j]] = [order[j], order[i]];
+    order.forEach((id, k) => { const x = list.find((y) => y.id === id)!; if (x.sort !== k) void saveCal({ ...x, sort: k }); });
   };
   return (
     <Page title="Calendari" dialog actions={<button class="iconbtn" aria-label="Aggiungi calendario" onClick={add}><Icon n="plus" /></button>}>
@@ -404,13 +418,24 @@ export function Calendars() {
           <div>
             <div class="row">
               <span class="cdot" style={{ background: c.color, width: "18px", height: "18px" }} />
-              <input class="inp grow" value={c.name} maxLength={80} onFocus={() => setEditing(c.id)} onChange={(e) => { const v = (e.target as HTMLInputElement).value.trim(); if (v) void saveCal({ ...c, name: v }); }} />
+              <input class="inp grow" value={c.name} maxLength={80} onFocus={() => setEditing(c.id)}
+                ref={(el) => { if (el && fresh === c.id) { el.focus(); el.select(); setFresh(null); } }}
+                onChange={(e) => { const v = (e.target as HTMLInputElement).value.trim(); if (v) void saveCal({ ...c, name: v }); }} />
               <Switch on={c.visible} label="Visibile" onChange={(v) => void saveCal({ ...c, visible: v })} />
             </div>
             {editing === c.id && (
               <>
-                <div class="palette">{PALETTE.map((p) => <button aria-label={p} class={c.color === p ? "on" : ""} style={{ background: p, color: p }} onClick={() => void saveCal({ ...c, color: p })}>{c.color === p && <Icon n="check" s />}</button>)}</div>
-                <div style={{ display: "flex", gap: "8px", padding: "0 14px 12px", justifyContent: "flex-end" }}>
+                <div class="palette">
+                  {PALETTE.map((p) => <button aria-label={p} class={c.color === p ? "on" : ""} style={{ background: p, color: p }} onClick={() => void saveCal({ ...c, color: p })}>{c.color === p && <Icon n="check" s />}</button>)}
+                  <label class={"custom" + (!PALETTE.includes(c.color) ? " on" : "")} title="Colore a scelta" style={{ color: c.color }}>
+                    <input type="color" value={c.color} onChange={(e) => void saveCal({ ...c, color: (e.target as HTMLInputElement).value.toLowerCase() })} />
+                    {!PALETTE.includes(c.color) ? <Icon n="check" s /> : <Icon n="palette" s />}
+                  </label>
+                </div>
+                <div style={{ display: "flex", gap: "8px", padding: "0 14px 12px", justifyContent: "flex-end", alignItems: "center" }}>
+                  <button class="iconbtn" aria-label="Sposta su" title="Sposta su" onClick={() => move(c, -1)}><Icon n="left" style={{ transform: "rotate(90deg)" }} /></button>
+                  <button class="iconbtn" aria-label="Sposta giù" title="Sposta giù" onClick={() => move(c, 1)}><Icon n="right" style={{ transform: "rotate(90deg)" }} /></button>
+                  <div style={{ flex: 1 }} />
                   {visibleCals.value.length > 1 && (
                     <button class="btn danger" onClick={() => {
                       const n = events.value.filter((e) => e.calendar_id === c.id).length;
@@ -427,7 +452,8 @@ export function Calendars() {
           </div>
         ))}
       </div>
-      <div class="note">Tocca il nome per cambiarlo e scegliere il colore. Con l'interruttore nascondi un calendario senza cancellarne gli eventi.</div>
+      <button class="btn" style={{ width: "100%", marginBottom: "12px" }} onClick={add}>+ Nuovo calendario</button>
+      <div class="note">Tocca il nome per cambiarlo, scegliere il colore (anche uno a piacere con la tavolozza) e l'ordine. Con l'interruttore nascondi un calendario senza cancellarne gli eventi.</div>
     </Page>
   );
 }
@@ -542,7 +568,9 @@ export function Drawer() {
         {views.map(([v, l, ic]) => <button class={"navitem" + (st.view === v ? " on" : "")} onClick={() => { setSettings({ view: v }); selDay.value = null; pop(); }}><Icon n={ic} />{l}</button>)}
         <div class="sect">Calendari</div>
         <CalToggles />
+        <button class="calitem addcal" onClick={() => replaceTop({ t: "calendars", add: true })}><span class="box"><Icon n="plus" /></span><span>Nuovo calendario</span></button>
         <div style={{ flex: 1 }} />
+        <button class="navitem" onClick={() => replaceTop({ t: "calendars" })}><Icon n="folder" />Gestisci calendari</button>
         <button class="navitem" onClick={() => replaceTop({ t: "settings" })}><Icon n="settings" />Impostazioni</button>
       </div>
     </>

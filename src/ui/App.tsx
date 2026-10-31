@@ -117,7 +117,7 @@ function Overlays() {
           case "scope": return <Scope occ={o.occ} action={o.action} />;
           case "search": return <Search />;
           case "settings": return <SettingsPage />;
-          case "calendars": return <Calendars />;
+          case "calendars": return <Calendars add={o.add} />;
           case "drawer": return <Drawer />;
           case "trofeo": return <TrofeoPage />;
         }
@@ -169,6 +169,7 @@ function Desk() {
         <SideMini />
         <div class="sect">Calendari</div>
         <CalToggles />
+        <button class="calitem addcal" onClick={() => push({ t: "calendars", add: true })}><span class="box"><Icon n="plus" /></span><span>Nuovo calendario</span></button>
         <div style={{ flex: 1 }} />
         <button class="navitem" onClick={() => push({ t: "calendars" })}><Icon n="folder" />Gestisci calendari</button>
         <button class="navitem" onClick={() => push({ t: "settings" })}><Icon n="settings" />Impostazioni</button>
