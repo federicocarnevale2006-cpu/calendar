@@ -1,7 +1,7 @@
 // Differenze fra telefono (Capacitor, Android) e PC (Tauri, Windows). Nel browser semplice tutto questo non fa niente.
 import { Capacitor } from "@capacitor/core";
 import { signal } from "@preact/signals";
-import { APK_URL, APP_BUILD, EXE_URL, SITE } from "./config";
+import { APK_URL, APP_BUILD, EXE_URL, VERSION_URL } from "./config";
 import { addDays, hm } from "./date";
 import type { Occ } from "./model";
 
@@ -100,7 +100,7 @@ export const update = signal<{ version: string; url: string } | null>(null);
 export async function checkUpdate(): Promise<boolean> {
   if (!isAndroid && !isTauri) return false;                     // la versione web e' sempre l'ultima
   try {
-    const r = await fetch(SITE + "version.json?t=" + Date.now(), { cache: "no-store" });
+    const r = await fetch(VERSION_URL + "?t=" + Date.now(), { cache: "no-store" });
     if (!r.ok) return false;
     const j = await r.json();
     if (Number(j.build) > APP_BUILD) {

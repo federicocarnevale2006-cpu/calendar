@@ -7,8 +7,12 @@ export const APP_VERSION: string = ENV.VITE_APP_VERSION || "1.0.0";
 export const APP_BUILD: number = Number(ENV.VITE_BUILD || 0);   // numero della compilazione (GitHub): serve a sapere se c'e' una versione piu' nuova
 // sito con la versione web e i file da scaricare (APK per Android, installazione per Windows)
 export const SITE = "https://federicocarnevale2006-cpu.github.io/calendar/";
-export const APK_URL = SITE + "download/Calendario.apk";
-export const EXE_URL = SITE + "download/Calendario-Setup.exe";
+// i file da scaricare stanno nelle Release di GitHub (funzionano anche se il sito non e' attivo)
+const REL = "https://github.com/federicocarnevale2006-cpu/calendar/releases/latest/download/";
+export const APK_URL = REL + "Calendario.apk";
+export const EXE_URL = REL + "Calendario-Setup.exe";
+// numero dell'ultima versione pubblicata (file scritto dalla compilazione)
+export const VERSION_URL = "https://raw.githubusercontent.com/federicocarnevale2006-cpu/calendar/gh-pages/version.json";
 
 export const PALETTE = [
   "#3b82f6", "#0ea5e9", "#14b8a6", "#22c55e", "#84cc16", "#eab308",
