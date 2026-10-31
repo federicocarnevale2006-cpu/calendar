@@ -73,3 +73,34 @@ export async function shiftDays(o: Occ, n: number) {
   if (!n || !evMap.value.get(o.ev.id)) return;
   await retime(o, addDays(o.start, n), addDays(o.end, n));       // «tutto il giorno»: o.end e' gia' il giorno dopo l'ultimo
 }
+
+/**
+ * Durante un trascinamento si ascolta il dito su tutta la finestra: se l'elemento toccato all'inizio sparisce o viene
+ * ridisegnato, il rilascio arriva lo stesso (prima l'app poteva restare «bloccata» col trascinamento a meta').
+ */
+export function follow(move: (e: PointerEvent) => void, up: (e: PointerEvent) => void, cancel: (e: PointerEvent) => void): () => void {
+  let last: { pointerId: number; clientX: number; clientY: number } | null = null;
+  const m = (e: PointerEvent) => { last = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY }; move(e); };
+  const u = (e: PointerEvent) => { off(); up(e); };
+  const c = (e: PointerEvent) => { off(); cancel(e); };
+  const t = (e: TouchEvent) => {                       // rete di sicurezza: dito alzato ma nessun pointerup ricevuto
+    if (e.touches.length) return;
+    setTimeout(() => { if (alive) { off(); if (last) up(last as unknown as PointerEvent); else cancel({ pointerId: -1 } as unknown as PointerEvent); } }, 80);
+  };
+  let alive = true;
+  const off = () => {
+    if (!alive) return;
+    alive = false;
+    window.removeEventListener("pointermove", m);
+    window.removeEventListener("pointerup", u);
+    window.removeEventListener("pointercancel", c);
+    window.removeEventListener("touchend", t);
+    window.removeEventListener("touchcancel", t);
+  };
+  window.addEventListener("pointermove", m, { passive: false });
+  window.addEventListener("pointerup", u);
+  window.addEventListener("pointercancel", c);
+  window.addEventListener("touchend", t);
+  window.addEventListener("touchcancel", t);
+  return off;
+}

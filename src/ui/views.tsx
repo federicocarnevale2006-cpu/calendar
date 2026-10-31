@@ -5,7 +5,7 @@ import { calById, dayOccurrences, newEvent, occurrences, saveEvent, settings, se
 import { holidayName } from "../holidays";
 import { haptic } from "../platform";
 import { cursor, now, push, selDay, width } from "./state";
-import { dragFlag, dragging, editable, LONG_MS, retime, shiftDays, SLOP, snap, STEP_MIN, thump, tick } from "./drag";
+import { dragFlag, dragging, editable, follow, LONG_MS, retime, shiftDays, SLOP, snap, STEP_MIN, thump, tick } from "./drag";
 import { Icon } from "./icons";
 
 const dayCls = (d: Date) => (d.getDay() === 0 || (settings.value.holidays && holidayName(d)) ? "sun" : d.getDay() === 6 ? "sat" : "");
@@ -122,6 +122,7 @@ export function MonthView({ desk }: { desk: boolean }) {
   type MD = { o: Occ; key: string; mode: "move" | "rs" | "re"; x0: number; y0: number; from: Date; active: boolean; pid: number; mouse: boolean; moved: boolean };
   const md = useRef<MD | null>(null);
   const mtimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mOff = useRef<(() => void) | null>(null);
   const [mdrag, setMdrag] = useState<{ key: string; mode: MD["mode"]; title: string; color: string; x: number; y: number; to: string | null; r0: string; r1: string } | null>(null);
   const [msel, setMsel] = useState<string | null>(null);
   const monthEl = useRef<HTMLDivElement>(null);
@@ -169,6 +170,8 @@ export function MonthView({ desk }: { desk: boolean }) {
     if (mode !== "move") e.stopPropagation();
     const from = dayAt(e.clientX, e.clientY) ?? startOfDay(o.start);
     md.current = { o, key, mode, x0: e.clientX, y0: e.clientY, from, active: false, pid: e.pointerId, mouse, moved: false };
+    mOff.current?.();
+    mOff.current = follow((ev) => mMoveRef.current(ev), (ev) => mUpRef.current(ev), (ev) => mUpRef.current(ev, true));
     if (mtimer.current) clearTimeout(mtimer.current);
     const x = e.clientX, y = e.clientY;
     if (mode !== "move" || msel === key) { if (!mouse) mActivate(x, y); }   // maniglie (o evento gia' preso): subito
@@ -194,8 +197,10 @@ export function MonthView({ desk }: { desk: boolean }) {
   };
   const mUp = (e: PointerEvent, cancel = false) => {
     const d = md.current;
-    if (!d || e.pointerId !== d.pid) return;
+    if (!d || (e.pointerId !== d.pid && e.pointerId !== -1)) return;
     if (mtimer.current) clearTimeout(mtimer.current);
+    mOff.current?.();
+    mOff.current = null;
     md.current = null;
     dragFlag.on = false;
     if (!d.active) return;
@@ -218,6 +223,9 @@ export function MonthView({ desk }: { desk: boolean }) {
       if (n) void retime(o, addDays(o.start, n), o.end).then(() => setMsel(null));
     }
   };
+  const mMoveRef = useRef(mMove), mUpRef = useRef(mUp);
+  mMoveRef.current = mMove;
+  mUpRef.current = mUp;
   const mh = (key: string) => ({
     "data-key": key,
     onPointerDown: (e: PointerEvent) => mDown(e, key),
@@ -271,7 +279,7 @@ export function MonthView({ desk }: { desk: boolean }) {
                       return (
                         <div class={"chip solid" + (mdrag?.key === s.key ? " picked" : "") + (msel === s.key ? " msel" : "")} title={s.ev.title} style={{ background: s.color, "--c": s.color } as any} {...mh(s.key)}>
                           <span class="ct">{s.ev.title || "(senza titolo)"}</span>
-                          {msel === s.key && !mdrag && <>{handle(s.key, "rs")}{handle(s.key, "re")}</>}
+                          {msel === s.key && <>{handle(s.key, "rs")}{handle(s.key, "re")}</>}
                         </div>
                       );
                     })}
@@ -288,7 +296,7 @@ export function MonthView({ desk }: { desk: boolean }) {
                     top: `${top + s.lane * lineH}px`, background: s.o.color, "--c": s.o.color,
                     left: `calc(${off}px + (100% - ${off}px) * ${s.c0 / 7} + 2px)`, width: `calc((100% - ${off}px) * ${(s.c1 - s.c0 + 1) / 7} - 4px)`,
                   }}><span class="ct">{s.o.ev.title || "(senza titolo)"}</span>
-                    {msel === s.o.key && !mdrag && <>
+                    {msel === s.o.key && <>
                       {sameDay(w[s.c0], startOfDay(s.o.start)) && handle(s.o.key, "rs")}
                       {sameDay(w[s.c1], lastDay(s.o)) && handle(s.o.key, "re")}
                     </>}
@@ -425,6 +433,7 @@ export function WeekView({ days }: { days: 1 | 7 }) {
   const dr = useRef<Drag | null>(null);                 // stesso stato, letto dai gestori del dito senza aspettare il ridisegno
   const [sel, setSel] = useState<string | null>(null);  // evento «preso» (dopo la pressione lunga): mostra le maniglie
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const offRef = useRef<(() => void) | null>(null);
   const auto = useRef<{ v: number; raf: number } | null>(null);
   const lastPt = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const cols = `52px repeat(${days}, minmax(0, 1fr))`;
@@ -526,6 +535,8 @@ export function WeekView({ days }: { days: 1 | 7 }) {
     if (mouse && e.button !== 0) return;
     const d: Drag = { mode, occ, key, x0: e.clientX, y0: e.clientY, sc0: scroller.current!.scrollTop, s0, e0, s: s0, e: e0, active: false, pid: e.pointerId, mouse };
     dr.current = d;
+    offRef.current?.();
+    offRef.current = follow((ev) => moveRef.current(ev), (ev) => finishRef.current(ev), (ev) => finishRef.current(ev, true));
     if (timer.current) clearTimeout(timer.current);
     // dito: pressione lunga (o subito, se l'evento e' gia' preso / si tocca una maniglia); mouse: parte muovendo
     if (!mouse) {
@@ -548,8 +559,10 @@ export function WeekView({ days }: { days: 1 | 7 }) {
   };
   const finish = (e: PointerEvent, cancel = false) => {
     const d = dr.current;
-    if (!d || e.pointerId !== d.pid) return;
+    if (!d || (e.pointerId !== d.pid && e.pointerId !== -1)) return;
     if (timer.current) clearTimeout(timer.current);
+    offRef.current?.();
+    offRef.current = null;
     if (auto.current) { cancelAnimationFrame(auto.current.raf); auto.current = null; }
     dr.current = null;
     dragFlag.on = false;
@@ -567,6 +580,9 @@ export function WeekView({ days }: { days: 1 | 7 }) {
       void retime(o, d.s, d.e).then((id) => { if (id) setSel(`${id}_${ymd(d.s)}`); });
     }
   };
+  const moveRef = useRef(onMove), finishRef = useRef(finish);
+  moveRef.current = onMove;
+  finishRef.current = finish;
   const handlers = {
     onPointerMove: onMove,
     onPointerUp: (e: PointerEvent) => finish(e),
