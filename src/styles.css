@@ -297,11 +297,11 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .blk.ghost { opacity: .32; }
 .blk.lifted { z-index: 6; box-shadow: 0 10px 26px rgba(0,0,0,.35); transform: scale(1.02); overflow: visible; pointer-events: none; }
 .blk.newblk { background: var(--accent) !important; opacity: .92; }
-.blk .hdl { position: absolute; left: 50%; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.3); touch-action: none; z-index: 2; }
+.blk .hdl { position: absolute; left: 50%; width: 18px; height: 18px; margin-left: -9px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.3); touch-action: none; z-index: 2; }
 .blk .hdl::after { content: ""; position: absolute; inset: -14px; }          /* zona di presa piu' grande del pallino (dito) */
 @media (pointer: fine) { .blk .hdl::after { inset: -4px; } }
-.blk .hdl.hdl-t { top: -8px; }
-.blk .hdl.hdl-b { bottom: -8px; }
+.blk .hdl.hdl-t { top: -9px; }
+.blk .hdl.hdl-b { bottom: -9px; }
 .blk:not(.sel):not(.lifted) .hdl { opacity: 0; transition: opacity .12s; }
 .blk:not(.sel):hover .hdl { opacity: 1; }
 .blk .hdl.hdl-t, .blk .hdl.hdl-b { cursor: ns-resize; }
@@ -312,6 +312,13 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .draghint { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); background: var(--text); color: var(--bg); font-size: 12.5px; padding: 8px 14px; border-radius: 18px; z-index: 20; pointer-events: none; text-align: center; animation: fade .2s ease; }
 .week { position: relative; }
 .chip, .mspan { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.mcell.droptarget { background: color-mix(in srgb, var(--accent) 22%, transparent) !important; outline: 2px dashed var(--accent); outline-offset: -2px; }
+.mcell.droptarget { background: color-mix(in srgb, var(--accent) 15%, transparent) !important; }
+.chip .ct, .mspan .ct { display: block; overflow: hidden; white-space: nowrap; }
+.chip.msel, .mspan.msel { padding: 0 12px; position: relative; z-index: 3; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--c, var(--accent)); }
+.mhdl { position: absolute; top: 50%; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; background: #fff; border: 3px solid var(--c, var(--accent)); box-shadow: 0 1px 4px rgba(0,0,0,.35); touch-action: none; z-index: 4; cursor: ew-resize; }
+.mhdl::after { content: ""; position: absolute; inset: -14px; }
+@media (pointer: fine) { .mhdl::after { inset: -4px; } }
+.mhdl.l { left: 0; }
+.mhdl.r { right: 0; }
 .dragghost { position: fixed; z-index: 60; pointer-events: none; padding: 4px 10px; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 700; box-shadow: 0 10px 26px rgba(0,0,0,.35); transform: translate(-50%, -130%); white-space: nowrap; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; }
 .chip.picked, .mspan.picked { opacity: .35; }

@@ -111,14 +111,18 @@ export function MonthView({ desk }: { desk: boolean }) {
   const order = [0, 1, 2, 3, 4, 5, 6].map((i) => (i + st.weekStart) % 7);
   const tapDay = (d: Date, dbl = false) => {
     if (dragging()) return;
+    if (msel) { setMsel(null); return; }                     // prima si «lascia» l'evento preso
     if (dbl || (!desk && sd && sameDay(sd, d))) { openNew(d); return; }
     selDay.value = d;
     if (d.getMonth() !== c.getMonth()) cursor.value = new Date(d.getFullYear(), d.getMonth(), 1);
   };
-  // ---- trascinare un evento su un altro giorno (pressione lunga, come Samsung; col mouse basta trascinare)
-  const md = useRef<{ o: Occ; key: string; x0: number; y0: number; from: Date; active: boolean; pid: number; mouse: boolean } | null>(null);
+  // ---- mese: pressione lunga su un evento e trascinamento = altro giorno; pressione lunga e rilascio = evento
+  // «preso» con due maniglie ai lati per allungarlo/accorciarlo di giorni (col mouse: trascinare / doppio clic)
+  type MD = { o: Occ; key: string; mode: "move" | "rs" | "re"; x0: number; y0: number; from: Date; active: boolean; pid: number; mouse: boolean; moved: boolean };
+  const md = useRef<MD | null>(null);
   const mtimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [mdrag, setMdrag] = useState<{ key: string; title: string; color: string; x: number; y: number; to: string | null } | null>(null);
+  const [mdrag, setMdrag] = useState<{ key: string; mode: MD["mode"]; title: string; color: string; x: number; y: number; to: string | null; r0: string; r1: string } | null>(null);
+  const [msel, setMsel] = useState<string | null>(null);
   const monthEl = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = monthEl.current;
@@ -127,7 +131,9 @@ export function MonthView({ desk }: { desk: boolean }) {
     el.addEventListener("touchmove", stop, { passive: false });
     return () => el.removeEventListener("touchmove", stop);
   }, []);
+  useEffect(() => setMsel(null), [c.getFullYear(), c.getMonth()]);
   const byKey = new Map(occs.map((o) => [o.key, o]));
+  const lastDay = (o: Occ) => startOfDay(new Date(Math.max(o.start.getTime(), o.end.getTime() - 1)));
   const dayAt = (x: number, y: number): Date | null => {
     for (const el of document.elementsFromPoint(x, y)) {
       const v = (el as HTMLElement).dataset?.day;
@@ -135,24 +141,37 @@ export function MonthView({ desk }: { desk: boolean }) {
     }
     return null;
   };
+  /** giorni coperti dall'evento mentre lo si sposta o lo si allunga (per evidenziarli) */
+  const range = (d: MD, t: Date | null): [string, string] => {
+    let a = startOfDay(d.o.start), b = lastDay(d.o);
+    if (t) {
+      if (d.mode === "move") { const n = dayDiff(d.from, t); a = addDays(a, n); b = addDays(b, n); }
+      else if (d.mode === "re") b = t < a ? a : t;
+      else a = t > b ? b : t;
+    }
+    return [ymd(a), ymd(b)];
+  };
   const mActivate = (x: number, y: number) => {
     const d = md.current;
     if (!d || d.active) return;
     d.active = true;
     dragFlag.on = true;
     void thump();
-    setMdrag({ key: d.key, title: d.o.ev.title || "(senza titolo)", color: d.o.color, x, y, to: ymd(d.from) });
+    const [r0, r1] = range(d, null);
+    setMdrag({ key: d.key, mode: d.mode, title: d.o.ev.title || "(senza titolo)", color: d.o.color, x, y, to: ymd(d.from), r0, r1 });
   };
-  const mDown = (e: PointerEvent, key: string) => {
+  const mDown = (e: PointerEvent, key: string, mode: MD["mode"] = "move") => {
     const o = byKey.get(key);
     if (!o || !editable(o)) return;
     const mouse = e.pointerType === "mouse";
     if (mouse && e.button !== 0) return;
+    if (mode !== "move") e.stopPropagation();
     const from = dayAt(e.clientX, e.clientY) ?? startOfDay(o.start);
-    md.current = { o, key, x0: e.clientX, y0: e.clientY, from, active: false, pid: e.pointerId, mouse };
+    md.current = { o, key, mode, x0: e.clientX, y0: e.clientY, from, active: false, pid: e.pointerId, mouse, moved: false };
     if (mtimer.current) clearTimeout(mtimer.current);
     const x = e.clientX, y = e.clientY;
-    if (!mouse) mtimer.current = setTimeout(() => mActivate(x, y), LONG_MS);
+    if (mode !== "move" || msel === key) { if (!mouse) mActivate(x, y); }   // maniglie (o evento gia' preso): subito
+    else if (!mouse) mtimer.current = setTimeout(() => mActivate(x, y), LONG_MS);
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* */ }
   };
   const mMove = (e: PointerEvent) => {
@@ -164,11 +183,13 @@ export function MonthView({ desk }: { desk: boolean }) {
       else if (far) { if (mtimer.current) clearTimeout(mtimer.current); md.current = null; return; }
       else return;
     }
+    if (far) d.moved = true;
     e.preventDefault();
     const t = dayAt(e.clientX, e.clientY);
     const to = t ? ymd(t) : null;
-    if (to) void tick(to);
-    setMdrag((m) => (m ? { ...m, x: e.clientX, y: e.clientY, to } : m));
+    const [r0, r1] = range(d, t);
+    void tick(`${r0}_${r1}`);
+    setMdrag((m) => (m ? { ...m, x: e.clientX, y: e.clientY, to, r0, r1 } : m));
   };
   const mUp = (e: PointerEvent, cancel = false) => {
     const d = md.current;
@@ -180,9 +201,20 @@ export function MonthView({ desk }: { desk: boolean }) {
     dragFlag.until = Date.now() + 350;
     const t = cancel ? null : dayAt(e.clientX, e.clientY);
     setMdrag(null);
-    if (t) {
+    if (!t) return;
+    const o = d.o;
+    if (d.mode === "move") {
       const n = dayDiff(d.from, t);
-      if (n) { void shiftDays(d.o, n); selDay.value = t; }
+      if (n) { void shiftDays(o, n); selDay.value = t; setMsel(null); }
+      else if (!d.mouse) setMsel(d.key);                             // dito: tenuto premuto e lasciato li' = compaiono le maniglie
+      return;
+    }
+    if (d.mode === "re") {
+      const n = dayDiff(lastDay(o), t < startOfDay(o.start) ? startOfDay(o.start) : t);
+      if (n) void retime(o, o.start, addDays(o.end, n)).then(() => setMsel(null));
+    } else {
+      const n = dayDiff(startOfDay(o.start), t > lastDay(o) ? lastDay(o) : t);
+      if (n) void retime(o, addDays(o.start, n), o.end).then(() => setMsel(null));
     }
   };
   const mh = (key: string) => ({
@@ -192,7 +224,15 @@ export function MonthView({ desk }: { desk: boolean }) {
     onPointerUp: (e: PointerEvent) => mUp(e),
     onPointerCancel: (e: PointerEvent) => mUp(e, true),
     onContextMenu: (e: Event) => e.preventDefault(),
+    onDblClick: (e: Event) => { e.stopPropagation(); setMsel(key); },          // PC: doppio clic = maniglie
   });
+  const handle = (key: string, side: "rs" | "re") => (
+    <span class={"mhdl " + (side === "rs" ? "l" : "r")}
+      onPointerDown={(e) => mDown(e as unknown as PointerEvent, key, side)} onPointerMove={mMove}
+      onPointerUp={(e) => mUp(e as unknown as PointerEvent)} onPointerCancel={(e) => mUp(e as unknown as PointerEvent, true)}
+      onClick={(e) => e.stopPropagation()} />
+  );
+  const inRange = (d: Date) => !!mdrag && ymd(d) >= mdrag.r0 && ymd(d) <= mdrag.r1;
 
   return (
     <div class="month" {...swipe} ref={monthEl}>
@@ -210,7 +250,7 @@ export function MonthView({ desk }: { desk: boolean }) {
               {w.map((d, i) => {
                 const slots = cells[i];
                 const cls = ["mcell", dayCls(d), d.getMonth() !== c.getMonth() ? "out" : "", sameDay(d, today) ? "today" : "", sd && sameDay(sd, d) ? "sel" : "",
-                  mdrag && mdrag.to === ymd(d) ? "droptarget" : ""].join(" ");
+                  inRange(d) ? "droptarget" : ""].join(" ");
                 if (dotsMode) {
                   const cols = [...new Set([...spans.filter((s) => s.c0 <= i && s.c1 >= i).map((s) => s.o.color), ...(slots.filter((x) => x && x !== "span") as Occ[]).map((o) => o.color)])].slice(0, 4);
                   return (
@@ -228,8 +268,9 @@ export function MonthView({ desk }: { desk: boolean }) {
                     {shown.map((s) => {
                       if (s === "span" || s === null) return <div class="chip" style={{ visibility: "hidden" }} />;
                       return (
-                        <div class={"chip solid" + (mdrag?.key === s.key ? " picked" : "")} title={s.ev.title} style={{ background: s.color }} {...mh(s.key)}>
-                          {s.ev.title || "(senza titolo)"}
+                        <div class={"chip solid" + (mdrag?.key === s.key ? " picked" : "") + (msel === s.key ? " msel" : "")} title={s.ev.title} style={{ background: s.color, "--c": s.color } as any} {...mh(s.key)}>
+                          <span class="ct">{s.ev.title || "(senza titolo)"}</span>
+                          {msel === s.key && !mdrag && <>{handle(s.key, "rs")}{handle(s.key, "re")}</>}
                         </div>
                       );
                     })}
@@ -240,21 +281,35 @@ export function MonthView({ desk }: { desk: boolean }) {
               {!dotsMode && spans.filter((s) => s.lane < Math.min(...limits.slice(s.c0, s.c1 + 1))).map((s) => {
                 const off = wn ? 22 : 0;
                 return (
-                  <div class={"mspan" + (mdrag?.key === s.o.key ? " picked" : "")} {...mh(s.o.key)}
+                  <div class={"mspan" + (mdrag?.key === s.o.key ? " picked" : "") + (msel === s.o.key ? " msel" : "")} {...mh(s.o.key)}
                     onClick={(e) => { const t = dayAt((e as MouseEvent).clientX, (e as MouseEvent).clientY); if (t) tapDay(t); }}
                     style={{
-                    top: `${top + s.lane * lineH}px`, background: s.o.color,
+                    top: `${top + s.lane * lineH}px`, background: s.o.color, "--c": s.o.color,
                     left: `calc(${off}px + (100% - ${off}px) * ${s.c0 / 7} + 2px)`, width: `calc((100% - ${off}px) * ${(s.c1 - s.c0 + 1) / 7} - 4px)`,
-                  }}>{s.o.ev.title || "(senza titolo)"}</div>
+                  }}><span class="ct">{s.o.ev.title || "(senza titolo)"}</span>
+                    {msel === s.o.key && !mdrag && <>
+                      {sameDay(w[s.c0], startOfDay(s.o.start)) && handle(s.o.key, "rs")}
+                      {sameDay(w[s.c1], lastDay(s.o)) && handle(s.o.key, "re")}
+                    </>}
+                  </div>
                 );
               })}
             </div>
           );
         })}
       </div>
-      {mdrag && <div class="dragghost" style={{ left: `${mdrag.x}px`, top: `${mdrag.y}px`, background: mdrag.color }}>{mdrag.title}</div>}
+      {mdrag && <div class="dragghost" style={{ left: `${mdrag.x}px`, top: `${mdrag.y}px`, background: mdrag.color }}>
+        {mdrag.mode === "move" ? mdrag.title : `${mdrag.title} · ${rangeLabel(mdrag.r0, mdrag.r1)}`}
+      </div>}
+      {msel && !mdrag && <div class="draghint">Tieni premuto e trascina per spostare, i pallini ai lati per allungare · tocca fuori per finire</div>}
     </div>
   );
+}
+
+function rangeLabel(a: string, b: string): string {
+  const x = parseDay(a), y = parseDay(b);
+  const f = (d: Date) => `${DAYS_SHORT[d.getDay()]} ${d.getDate()}`;
+  return a === b ? f(x) : `${f(x)} → ${f(y)}`;
 }
 
 function parseDay(v: string): Date {
@@ -566,7 +621,16 @@ export function WeekView({ days }: { days: 1 | 7 }) {
                   return (
                     <div class={"blk" + (isSel ? " sel" : "") + (hidden ? " ghost" : "")} role="button" tabIndex={0}
                       style={{ top: `${b.top}px`, height: `${Math.max(20, b.h - 2)}px`, left: `calc(${(b.col / b.cols) * 100}% + 1px)`, width: `calc(${100 / b.cols}% - 3px)`, background: b.o.color }}
-                      onPointerDown={(e) => { if (ok) begin(e, "move", b.o, b.o.start, b.o.end, b.o.key); }}
+                      onPointerDown={(e) => {
+                        if (!ok) return;
+                        let mode: Drag["mode"] = "move";
+                        if (isSel) {                             // evento gia' preso: anche i bordi (non solo i pallini) cambiano inizio/fine
+                          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          const y = e.clientY - r.top, zone = Math.min(24, r.height / 3);
+                          if (y < zone) mode = "start"; else if (y > r.height - zone) mode = "end";
+                        }
+                        begin(e, mode, b.o, b.o.start, b.o.end, b.o.key);
+                      }}
                       {...handlers}
                       onClick={() => { if (!dragging()) push({ t: "detail", occ: b.o }); }}>
                       <div class="bin">
@@ -602,7 +666,7 @@ export function WeekView({ days }: { days: 1 | 7 }) {
           })}
         </div>
       </div>
-      {sel && !preview && <div class="draghint">Trascina l'evento per spostarlo, i pallini per cambiare inizio e fine · tocca fuori per finire</div>}
+      {sel && !preview && <div class="draghint">Trascina per spostare · trascina i pallini (o i bordi) per cambiare inizio e fine · tocca fuori per finire</div>}
     </div>
   );
 }

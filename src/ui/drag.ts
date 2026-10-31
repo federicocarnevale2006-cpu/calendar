@@ -51,17 +51,20 @@ export async function retime(o: Occ, s: Date, e: Date): Promise<string | null> {
   const times = master.all_day
     ? { start_at: localDateToUtcIso(s), end_at: localDateToUtcIso(addDays(e, -1)) }
     : { start_at: s.toISOString(), end_at: e.toISOString() };
-  const when = master.all_day ? `${s.getDate()}/${s.getMonth() + 1}` : `${s.getDate()}/${s.getMonth() + 1} alle ${hm(s)}`;
+  const f = (d: Date) => (master.all_day ? `${d.getDate()}/${d.getMonth() + 1}` : `${d.getDate()}/${d.getMonth() + 1} alle ${hm(d)}`);
+  const sameS = s.getTime() === o.start.getTime(), sameE = e.getTime() === o.end.getTime();
+  const lastIncl = master.all_day ? addDays(e, -1) : e;
+  const when = sameS && !sameE ? `fine ${f(lastIncl)}` : !sameS && sameE ? `inizio ${f(s)}` : f(s);
   if (master.rrule) {
     const before = master;
     const single: Ev = { ...master, id: uuid(), rrule: null, exdates: [], ...times };
     await saveEvent({ ...master, exdates: [...new Set([...(master.exdates || []), ymd(o.start)])] });
     await saveEvent(single);
-    showToast(`Solo questa volta: ${when}`, { label: "Annulla", run: () => { void saveEvent(before); void saveEvent({ ...single, deleted: true }); } });
+    showToast(`Solo questa volta · ${when}`, { label: "Annulla", run: () => { void saveEvent(before); void saveEvent({ ...single, deleted: true }); } });
     return single.id;
   }
   await saveEvent({ ...master, ...times });
-  showToast(`Spostato: ${when}`, { label: "Annulla", run: () => void saveEvent(master) });
+  showToast(sameS || sameE ? `Cambiato · ${when}` : `Spostato · ${when}`, { label: "Annulla", run: () => void saveEvent(master) });
   return master.id;
 }
 
