@@ -33,6 +33,35 @@ fn read_trofeo_link() -> Option<String> {
     }
 }
 
+/// Un solo file .exe, come Trofeo LCD: se con l'app aperta si apre un ALTRO Calendario.exe (per esempio la versione nuova
+/// appena scaricata), questa si chiude e parte quello nuovo. Se e' lo stesso file, si mostra solo la finestra.
+fn other_exe(args: &[String], cwd: &str) -> Option<PathBuf> {
+    let first = args.first()?;
+    let mut p = PathBuf::from(first);
+    if p.is_relative() {
+        p = PathBuf::from(cwd).join(p);
+    }
+    let other = std::fs::canonicalize(&p).ok()?;
+    let me = std::fs::canonicalize(std::env::current_exe().ok()?).ok()?;
+    if other != me && other.is_file() {
+        Some(other)
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn start_later(exe: &PathBuf) {
+    use std::os::windows::process::CommandExt;
+    // un secondo di attesa: il tempo che questa copia si chiuda e liberi il posto (una sola istanza alla volta)
+    let line = format!("/C ping -n 2 127.0.0.1 >nul & start \"\" \"{}\"", exe.display());
+    let _ = std::process::Command::new("cmd").raw_arg(line).creation_flags(0x0800_0000).spawn();
+}
+#[cfg(not(windows))]
+fn start_later(exe: &PathBuf) {
+    let _ = std::process::Command::new(exe).spawn();
+}
+
 fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
@@ -44,7 +73,14 @@ fn show_main(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            if let Some(exe) = other_exe(&args, &cwd) {
+                start_later(&exe);
+                app.exit(0);
+            } else {
+                show_main(app);
+            }
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
@@ -74,6 +110,13 @@ pub fn run() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            // avvio con Windows gia' attivo: lo si riscrive col percorso di QUESTO file (se il file e' stato spostato o aggiornato)
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                if let Ok(true) = app.autolaunch().is_enabled() {
+                    let _ = app.autolaunch().enable();
+                }
+            }
             // avviato con Windows: resta nell'area di notifica (per i promemoria) senza aprire la finestra
             let hidden = std::env::args().any(|a| a == "--nascosto");
             if let Some(w) = app.get_webview_window("main") {

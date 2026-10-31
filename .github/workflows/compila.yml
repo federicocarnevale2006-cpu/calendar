@@ -55,15 +55,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: src-tauri }
       - run: npm ci --no-audit --no-fund
-      - name: Installazione Windows
+      - name: Calendario.exe (un solo file, senza installazione)
         shell: bash
         run: |
           echo "{\"version\":\"$VITE_APP_VERSION\"}" > src-tauri/tauri.ci.json
-          npx tauri build --config src-tauri/tauri.ci.json
+          npx tauri build --no-bundle --config src-tauri/tauri.ci.json
+          ls -la src-tauri/target/release/*.exe
       - uses: actions/upload-artifact@v4
         with:
           name: exe
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: src-tauri/target/release/calendario.exe
 
   pubblica:
     needs: [android, windows]
@@ -76,7 +77,9 @@ jobs:
           mkdir -p site/download
           cp -r art/web/. site/
           cp art/apk/app-release.apk site/download/Calendario.apk
-          cp art/exe/*.exe site/download/Calendario-Setup.exe
+          cp art/exe/calendario.exe site/download/Calendario.exe
+          # stesso file anche col nome vecchio: le versioni 1.0.1-1.0.3 cercano «Calendario-Setup.exe» per aggiornarsi
+          cp art/exe/calendario.exe site/download/Calendario-Setup.exe
           touch site/.nojekyll
           echo "{\"version\":\"$VITE_APP_VERSION\",\"build\":$VITE_BUILD}" > site/version.json
           ls -la site site/download
@@ -91,4 +94,5 @@ jobs:
           name: Calendario ${{ env.VITE_APP_VERSION }}
           files: |
             site/download/Calendario.apk
+            site/download/Calendario.exe
             site/download/Calendario-Setup.exe

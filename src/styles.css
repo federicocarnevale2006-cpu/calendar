@@ -191,6 +191,8 @@ input, textarea, select { font: inherit; color: inherit; }
 .dt input { background: var(--surface2); border: 0; border-radius: 12px; padding: 8px 10px; font-size: 15px; outline: none; min-width: 0; }
 .dt input[type="time"] { min-width: 112px; width: auto; }
 select.inp { -webkit-appearance: none; appearance: none; cursor: pointer; }
+/* l'elenco che si apre: senza un colore esplicito Windows lo disegnava bianco con le scritte bianche (si vedeva solo la voce sotto il mouse) */
+select option, select optgroup { background-color: var(--surface); color: var(--text); }
 .palette { display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 18px 14px; }
 .palette button { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: #fff; }
 .palette button.on { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px currentColor; }

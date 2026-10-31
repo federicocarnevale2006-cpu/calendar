@@ -10,7 +10,7 @@ export const SITE = "https://federicocarnevale2006-cpu.github.io/calendar/";
 // i file da scaricare stanno nelle Release di GitHub (funzionano anche se il sito non e' attivo)
 const REL = "https://github.com/federicocarnevale2006-cpu/calendar/releases/latest/download/";
 export const APK_URL = REL + "Calendario.apk";
-export const EXE_URL = REL + "Calendario-Setup.exe";
+export const EXE_URL = REL + "Calendario.exe";           // un solo file, senza installazione (come Trofeo LCD)
 // numero dell'ultima versione pubblicata (file scritto dalla compilazione)
 export const VERSION_URL = "https://raw.githubusercontent.com/federicocarnevale2006-cpu/calendar/gh-pages/version.json";
 
