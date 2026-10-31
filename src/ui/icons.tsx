@@ -1,7 +1,7 @@
 // Icone (tracciati in stile Material Symbols arrotondati, disegnati qui: nessun file esterno)
 const P: Record<string, string> = {
   menu: "M4 18h16a1 1 0 0 0 0-2H4a1 1 0 0 0 0 2Zm0-5h16a1 1 0 0 0 0-2H4a1 1 0 0 0 0 2ZM3 7a1 1 0 0 0 1 1h16a1 1 0 0 0 0-2H4a1 1 0 0 0-1 1Z",
-  search: "M15.5 14h-.79l-.28-.27A6.5 6.5 0 1 0 14 15.5l.27.28v.79l4.25 4.25a1.06 1.06 0 0 0 1.5-1.5L15.5 14Zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Z",
+  search: "M9.5 3a6.5 6.5 0 0 1 5.18 10.43l5.2 5.2a1 1 0 0 1-1.42 1.41l-5.2-5.19A6.5 6.5 0 1 1 9.5 3Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z",
   cal: "M19 4h-1V3a1 1 0 0 0-2 0v1H8V3a1 1 0 0 0-2 0v1H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 15H5V9h14v10Z",
   plus: "M18 13h-5v5a1 1 0 0 1-2 0v-5H6a1 1 0 0 1 0-2h5V6a1 1 0 0 1 2 0v5h5a1 1 0 0 1 0 2Z",
   close: "M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 0 0 5.7 7.11L10.59 12 5.7 16.89a1 1 0 1 0 1.41 1.41L12 13.41l4.89 4.89a1 1 0 0 0 1.41-1.41L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4Z",
@@ -35,7 +35,7 @@ const P: Record<string, string> = {
 export function Icon({ n, s, style }: { n: keyof typeof P | string; s?: boolean; style?: any }) {
   return (
     <svg class={"ic" + (s ? " s" : "")} viewBox="0 0 24 24" aria-hidden="true" style={style}>
-      <path d={P[n] || ""} />
+      <path d={P[n] || ""} fill-rule="evenodd" />
     </svg>
   );
 }
