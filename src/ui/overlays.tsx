@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { tick } from "./drag";
 import { addDays, cap, DAYS_SHORT, fmtLongDay, hm, localDateToUtcIso, MONTHS_SHORT, parseYmd, startOfDay, utcDateToLocal, ymd } from "../date";
 import { describeRule, expand, parseRule, ruleToString, uuid, type Cal, type Ev, type Occ, type Rule } from "../model";
 import { APK_URL, APP_VERSION, EXE_URL, PALETTE, SUPABASE_KEY, SUPABASE_URL } from "../config";
@@ -32,21 +33,86 @@ function Page({ title, onClose, children, actions, dialog }: { title: string; on
   );
 }
 
-/** Data o ora scritta all'italiana («Sab 31 ott 2026», «20:00»); toccandola si apre il selettore del telefono/PC. */
-function DTField({ type, value, onChange, bad }: { type: "date" | "time"; value: string; onChange: (v: string) => void; bad?: boolean }) {
-  const ref = useRef<HTMLInputElement>(null);
+/** Data o ora all'italiana («Sab 31 ott 2026», «20:00»): toccandola si apre sotto il selettore, come nel calendario Samsung. */
+function DTChip({ type, value, on, bad, onClick }: { type: "date" | "time"; value: string; on: boolean; bad?: boolean; onClick: () => void }) {
   let label = value || "—";
   if (type === "date" && value) {
     const d = parseYmd(value);
     label = `${cap(DAYS_SHORT[d.getDay()])} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
   }
+  return <button type="button" class={"dtf " + type + (on ? " on" : "") + (bad ? " bad" : "")} onClick={onClick}>{label}</button>;
+}
+
+const IH = 40;                                         // altezza di una voce della rotella
+/** Rotella che scorre col dito e si ferma sulla voce (come il selettore dell'ora Samsung), con vibrazione a ogni scatto. */
+function Wheel({ n, value, onChange }: { n: number; value: number; onChange: (v: number) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [cur, setCur] = useState(value);
+  const t = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const busy = useRef(false);
+  const cb = useRef(onChange);
+  cb.current = onChange;                                 // sempre la versione aggiornata (l'altra rotella puo' essere appena cambiata)
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !busy.current) { el.scrollTop = value * IH; setCur(value); }
+  }, [value]);
+  const onScroll = () => {
+    const el = ref.current!;
+    busy.current = true;
+    const i = Math.max(0, Math.min(n - 1, Math.round(el.scrollTop / IH)));
+    if (i !== cur) { setCur(i); void tick("w" + i); }
+    if (t.current) clearTimeout(t.current);
+    t.current = setTimeout(() => {
+      busy.current = false;
+      const j = Math.max(0, Math.min(n - 1, Math.round(el.scrollTop / IH)));
+      cb.current(j);
+    }, 110);
+  };
   return (
-    <label class={"dtf " + type + (bad ? " bad" : "")} onClick={() => { try { (ref.current as any)?.showPicker?.(); } catch { /* il browser apre il suo */ } }}>
-      <span>{label}</span>
-      <input ref={ref} type={type} value={value} onInput={(e) => { const v = (e.target as HTMLInputElement).value; if (v) onChange(v); }} />
-    </label>
+    <div class="wheel" ref={ref} onScroll={onScroll}>
+      <div style={{ height: `${IH * 2}px` }} />
+      {Array.from({ length: n }, (_, i) => (
+        <div class={"wi" + (i === cur ? " on" : "")} onClick={() => ref.current?.scrollTo({ top: i * IH, behavior: "smooth" })}>{String(i).padStart(2, "0")}</div>
+      ))}
+      <div style={{ height: `${IH * 2}px` }} />
+    </div>
   );
 }
+
+function TimeWheel({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const vr = useRef(value);
+  vr.current = value;
+  const [h, m] = (value || "09:00").split(":").map((x) => parseInt(x) || 0);
+  const cur = () => (vr.current || "09:00").split(":").map((x) => parseInt(x) || 0);
+  const out = (hh: number, mm: number) => {
+    const v = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    if (v !== vr.current) { vr.current = v; onChange(v); }
+  };
+  return (
+    <div class="twheel">
+      <div class="band" />
+      <Wheel n={24} value={h} onChange={(v) => out(v, cur()[1])} />
+      <span class="sep">:</span>
+      <Wheel n={60} value={m} onChange={(v) => out(cur()[0], v)} />
+    </div>
+  );
+}
+
+function DatePick({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const d = parseYmd(value);
+  const [m, setM] = useState(new Date(d.getFullYear(), d.getMonth(), 1));
+  return (
+    <div class="datepick minical">
+      <header>
+        <b>{cap(MONTHS_FULL[m.getMonth()])} {m.getFullYear()}</b>
+        <button type="button" class="iconbtn" aria-label="Mese precedente" onClick={() => setM(new Date(m.getFullYear(), m.getMonth() - 1, 1))}><Icon n="left" s /></button>
+        <button type="button" class="iconbtn" aria-label="Mese successivo" onClick={() => setM(new Date(m.getFullYear(), m.getMonth() + 1, 1))}><Icon n="right" s /></button>
+      </header>
+      <MiniMonth y={m.getFullYear()} m={m.getMonth()} compact sel={d} onPick={(x) => { void tick(ymd(x)); onChange(ymd(x)); }} />
+    </div>
+  );
+}
+const MONTHS_FULL = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
 
 export const REMINDERS: [number, string][] = [[0, "All'ora dell'evento"], [5, "5 minuti prima"], [10, "10 minuti prima"], [15, "15 minuti prima"],
   [30, "30 minuti prima"], [60, "1 ora prima"], [120, "2 ore prima"], [1440, "1 giorno prima"], [2880, "2 giorni prima"], [10080, "1 settimana prima"]];
@@ -183,6 +249,8 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
   const [notes, setNotes] = useState(ev.notes);
   const [showColors, setShowColors] = useState(false);
   const [showRepeat, setShowRepeat] = useState(false);
+  const [pick, setPick] = useState<null | "sd" | "st" | "ed" | "et">(null);   // selettore aperto (data/ora di inizio/fine)
+  const tog = (k: "sd" | "st" | "ed" | "et") => setPick(pick === k ? null : k);
   const titleRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (isNew) setTimeout(() => titleRef.current?.focus(), 250); }, []);
   const cal = calById.value.get(calId || "");
@@ -257,20 +325,24 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
           <div style={{ width: "24px" }} />
           <div class="grow"><div class="val" style={{ marginBottom: "6px" }}>Inizio</div>
             <div class="dt">
-              <DTField type="date" value={sd.date} onChange={(v) => setStart({ ...sd, date: v })} />
-              {!allDay && <DTField type="time" value={sd.time} onChange={(v) => setStart({ ...sd, time: v })} />}
+              <DTChip type="date" value={sd.date} on={pick === "sd"} onClick={() => tog("sd")} />
+              {!allDay && <DTChip type="time" value={sd.time} on={pick === "st"} onClick={() => tog("st")} />}
             </div>
           </div>
         </div>
+        {pick === "sd" && <div class="picker"><DatePick value={sd.date} onChange={(v) => { setStart({ ...sd, date: v }); setPick(null); }} /></div>}
+        {pick === "st" && !allDay && <div class="picker"><TimeWheel value={sd.time} onChange={(v) => setStart({ ...sd, time: v })} /></div>}
         <div class="row">
           <div style={{ width: "24px" }} />
           <div class="grow"><div class="val" style={{ marginBottom: "6px", color: bad ? "var(--danger)" : undefined }}>{bad ? "La fine deve venire dopo l'inizio" : "Fine"}</div>
             <div class="dt">
-              <DTField type="date" value={ed.date} onChange={(v) => setEd({ ...ed, date: v })} bad={bad} />
-              {!allDay && <DTField type="time" value={ed.time} onChange={(v) => setEd({ ...ed, time: v })} bad={bad} />}
+              <DTChip type="date" value={ed.date} on={pick === "ed"} bad={bad} onClick={() => tog("ed")} />
+              {!allDay && <DTChip type="time" value={ed.time} on={pick === "et"} bad={bad} onClick={() => tog("et")} />}
             </div>
           </div>
         </div>
+        {pick === "ed" && <div class="picker"><DatePick value={ed.date} onChange={(v) => { setEd({ ...ed, date: v }); setPick(null); }} /></div>}
+        {pick === "et" && !allDay && <div class="picker"><TimeWheel value={ed.time} onChange={(v) => setEd({ ...ed, time: v })} /></div>}
       </div>
       <div class="card">
         {scope !== "one" && (

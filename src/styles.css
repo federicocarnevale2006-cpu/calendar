@@ -81,7 +81,7 @@ input, textarea, select { font: inherit; color: inherit; }
 .chip.timed { color: var(--text); padding-left: 0; display: flex; gap: 3px; align-items: center; background: color-mix(in srgb, var(--c) 16%, transparent); }
 .chip.timed i { width: 3px; height: 16px; border-radius: 2px 0 0 2px; flex: none; }
 .more { font-size: 10.5px; color: var(--muted); padding: 0 4px; font-weight: 600; }
-.mspan { position: absolute; height: 16px; font-size: 11px; line-height: 15px; border-radius: 5px; color: #fff; padding: 0 5px; white-space: nowrap; overflow: hidden; font-weight: 600; pointer-events: none; }
+.mspan { position: absolute; height: 16px; font-size: 11px; line-height: 15px; border-radius: 5px; color: #fff; padding: 0 5px; white-space: nowrap; overflow: hidden; font-weight: 600; cursor: pointer; }
 .dots { display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; padding: 0 2px; }
 .dots i { width: 6px; height: 6px; border-radius: 50%; }
 
@@ -193,7 +193,17 @@ input, textarea, select { font: inherit; color: inherit; }
 .dt input[type="time"] { min-width: 112px; width: auto; }
 .dtf { position: relative; display: inline-flex; align-items: center; height: 40px; padding: 0 14px; border-radius: 12px; background: var(--surface2); font-size: 15.5px; font-weight: 600; cursor: pointer; }
 .dtf.bad { color: var(--danger); }
-.dtf input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; cursor: pointer; }
+.dtf.on { background: var(--accent-soft); color: var(--accent); }
+.picker { padding: 2px 14px 12px 52px; animation: fade .18s ease; }
+.twheel { position: relative; display: flex; justify-content: center; align-items: center; gap: 4px; height: 200px; }
+.twheel .band { position: absolute; left: 50%; width: 190px; margin-left: -95px; top: 80px; height: 40px; border-radius: 12px; background: var(--surface2); }
+.twheel .sep { position: relative; font-size: 24px; font-weight: 700; }
+.wheel { position: relative; width: 74px; height: 200px; overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: none; overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(transparent, #000 28%, #000 72%, transparent); mask-image: linear-gradient(transparent, #000 28%, #000 72%, transparent); }
+.wheel::-webkit-scrollbar { display: none; }
+.wi { height: 40px; line-height: 40px; text-align: center; font-size: 21px; color: var(--muted); scroll-snap-align: center; cursor: pointer; font-variant-numeric: tabular-nums; -webkit-user-select: none; user-select: none; }
+.wi.on { color: var(--text); font-weight: 700; font-size: 25px; }
+.datepick .mini button { height: 36px; font-size: 14px; }
 .quickadd { display: flex; align-items: center; gap: 10px; margin: 4px 12px 12px; padding: 4px 4px 4px 14px; border-radius: 22px; background: var(--surface2); flex: none; }
 .quickadd .cdot { width: 10px; height: 10px; flex: none; }
 .quickadd .inp { flex: 1; font-size: 15px; }
@@ -279,3 +289,29 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .search input { flex: 1; height: 46px; border-radius: 23px; background: var(--surface); border: 0; padding: 0 18px; font-size: 16px; outline: none; }
 .login .dl { display: flex; justify-content: center; gap: 18px; margin-top: 18px; flex-wrap: wrap; }
 .login .dl a { color: var(--accent); font-size: 14px; text-decoration: none; font-weight: 600; }
+
+/* ---------- spostare e allungare gli eventi col dito (come Samsung) ---------- */
+.blk { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: pointer; overflow: visible; }
+.blk .bin { overflow: hidden; height: 100%; display: flex; flex-direction: column; }
+.blk.sel { z-index: 4; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px currentColor, 0 6px 18px rgba(0,0,0,.28); overflow: visible; color: #fff; }
+.blk.ghost { opacity: .32; }
+.blk.lifted { z-index: 6; box-shadow: 0 10px 26px rgba(0,0,0,.35); transform: scale(1.02); overflow: visible; pointer-events: none; }
+.blk.newblk { background: var(--accent) !important; opacity: .92; }
+.blk .hdl { position: absolute; left: 50%; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.3); touch-action: none; z-index: 2; }
+.blk .hdl::after { content: ""; position: absolute; inset: -14px; }          /* zona di presa piu' grande del pallino (dito) */
+@media (pointer: fine) { .blk .hdl::after { inset: -4px; } }
+.blk .hdl.hdl-t { top: -8px; }
+.blk .hdl.hdl-b { bottom: -8px; }
+.blk:not(.sel):not(.lifted) .hdl { opacity: 0; transition: opacity .12s; }
+.blk:not(.sel):hover .hdl { opacity: 1; }
+.blk .hdl.hdl-t, .blk .hdl.hdl-b { cursor: ns-resize; }
+.blk.lifted small { font-weight: 700; opacity: 1; }
+.snapline { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed var(--accent); z-index: 5; pointer-events: none; }
+.snapline b { position: absolute; left: -54px; top: -10px; width: 50px; text-align: right; font-size: 11.5px; color: var(--accent); background: var(--surface); padding-right: 3px; }
+.wscroll.dragging { touch-action: none; }
+.draghint { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); background: var(--text); color: var(--bg); font-size: 12.5px; padding: 8px 14px; border-radius: 18px; z-index: 20; pointer-events: none; text-align: center; animation: fade .2s ease; }
+.week { position: relative; }
+.chip, .mspan { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.mcell.droptarget { background: color-mix(in srgb, var(--accent) 22%, transparent) !important; outline: 2px dashed var(--accent); outline-offset: -2px; }
+.dragghost { position: fixed; z-index: 60; pointer-events: none; padding: 4px 10px; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 700; box-shadow: 0 10px 26px rgba(0,0,0,.35); transform: translate(-50%, -130%); white-space: nowrap; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; }
+.chip.picked, .mspan.picked { opacity: .35; }
