@@ -8,7 +8,7 @@ import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width,
 import { Icon } from "./icons";
 import { Login } from "./Login";
 import { AgendaView, DayList, DaySheet, MonthView, openNew, QuickAdd, WeekView, YearView } from "./views";
-import { Calendars, CalToggles, Detail, Drawer, Editor, Scope, Search, SettingsPage, SideMini, TrofeoPage } from "./overlays";
+import { Calendars, CalToggles, Detail, Drawer, Editor, QuickSheet, Scope, Search, SettingsPage, SideMini, TrofeoPage } from "./overlays";
 
 function useTheme() {
   const t = settings.value.theme;
@@ -149,6 +149,7 @@ function Overlays() {
         switch (o.t) {
           case "detail": return <Detail occ={o.occ} />;
           case "editor": return <Editor ev={o.ev} isNew={o.isNew} occ={o.occ} scope={o.scope} />;
+          case "quick": return <QuickSheet ev={o.ev} />;
           case "scope": return <Scope occ={o.occ} action={o.action} />;
           case "search": return <Search />;
           case "settings": return <SettingsPage />;

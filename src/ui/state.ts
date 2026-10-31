@@ -5,6 +5,7 @@ import type { Ev, Occ } from "../model";
 export type Overlay =
   | { t: "detail"; occ: Occ }
   | { t: "editor"; ev: Ev; isNew: boolean; occ?: Occ; scope?: "one" | "after" | "all" }
+  | { t: "quick"; ev: Ev }
   | { t: "scope"; occ: Occ; action: "edit" | "delete" }
   | { t: "search" }
   | { t: "settings" }

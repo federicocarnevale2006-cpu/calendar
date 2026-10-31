@@ -152,11 +152,6 @@ export function Detail({ occ }: { occ: Occ }) {
       <div class="scrim" onClick={pop} />
       <div class="sheet detail">
         <div class="acts">
-          {!isHoliday(ev) && <>
-            <button class="iconbtn" aria-label="Duplica" title="Duplica" onClick={dup}><Icon n="copy" /></button>
-            <button class="iconbtn" aria-label="Elimina" title="Elimina" onClick={doDel}><Icon n="trash" /></button>
-            <button class="iconbtn" aria-label="Modifica" title="Modifica" onClick={doEdit}><Icon n="edit" /></button>
-          </>}
           <button class="iconbtn" aria-label="Chiudi" onClick={pop}><Icon n="close" /></button>
         </div>
         <div class="head">
@@ -173,6 +168,112 @@ export function Detail({ occ }: { occ: Occ }) {
           {ev.notes && <div class="row" style={{ alignItems: "flex-start" }}><Icon n="notes" /><div class="grow lab" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{ev.notes}</div></div>}
           {cal && <div class="row"><Icon n="cal" /><div class="grow lab">{cal.name}</div><span class="cdot" style={{ background: cal.color }} /></div>}
           {isHoliday(ev) && <div class="row"><Icon n="cal" /><div class="grow lab">Festività nazionale</div><span class="cdot" style={{ background: o.color }} /></div>}
+          <div class="row"><Icon n="clock" /><div class="grow lab">{dday(o.start)}</div></div>
+        </div>
+        {!isHoliday(ev) && (
+          <div class="dbar">
+            <button onClick={doEdit}><Icon n="edit" /><span>Modifica</span></button>
+            <button onClick={() => share(o)}><Icon n="share" /><span>Condividi</span></button>
+            <button onClick={dup}><Icon n="copy" /><span>Duplica</span></button>
+            <button class="del" onClick={doDel}><Icon n="trash" /><span>Elimina</span></button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** Conto alla rovescia come il «D-Day» del calendario Samsung. */
+function dday(d: Date): string {
+  const n = Math.round((startOfDay(d).getTime() - startOfDay(new Date()).getTime()) / 86400000);
+  if (n === 0) return "Oggi · D-Day";
+  if (n === 1) return "Domani · D-1";
+  if (n > 0) return `Fra ${n} giorni · D-${n}`;
+  if (n === -1) return "Ieri · D+1";
+  return `${-n} giorni fa · D+${-n}`;
+}
+
+async function share(o: Occ) {
+  const text = [o.ev.title || "(senza titolo)", whenText(o), o.ev.location, o.ev.notes].filter(Boolean).join("\n");
+  try {
+    if ((navigator as any).share) { await (navigator as any).share({ title: o.ev.title, text }); return; }
+  } catch { return; }                                    // annullato dall'utente
+  try { await navigator.clipboard.writeText(text); showToast("Evento copiato: incollalo dove vuoi"); } catch { showToast("Condivisione non disponibile"); }
+}
+
+// ------------------------------------------------------------------------------------- inserimento rapido
+/** Come il «+» del calendario Samsung: un pannello in basso con titolo, orari e calendario; «Dettagli» apre tutto. */
+export function QuickSheet({ ev }: { ev: Ev }) {
+  const s0 = ev.all_day ? utcDateToLocal(ev.start_at) : new Date(ev.start_at);
+  const e0 = ev.all_day ? utcDateToLocal(ev.end_at) : new Date(ev.end_at);
+  const [title, setTitle] = useState(ev.title);
+  const [allDay, setAllDay] = useState(ev.all_day);
+  const [sd, setSd] = useState(toLocalInput(s0));
+  const [ed, setEd] = useState(toLocalInput(e0));
+  const [calId, setCalId] = useState(ev.calendar_id);
+  const [pick, setPick] = useState<null | "sd" | "st" | "ed" | "et" | "cal">(null);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { setTimeout(() => ref.current?.focus(), 200); }, []);
+  const start = allDay ? parseYmd(sd.date) : new Date(`${sd.date}T${sd.time || "00:00"}`);
+  const end = allDay ? parseYmd(ed.date) : new Date(`${ed.date}T${ed.time || "00:00"}`);
+  const bad = !(end >= start) || isNaN(start.getTime()) || isNaN(end.getTime());
+  const cal = calById.value.get(calId || "");
+  const setStart = (v: { date: string; time: string }) => {
+    const ns = allDay ? parseYmd(v.date) : new Date(`${v.date}T${v.time || "00:00"}`);
+    if (!isNaN(ns.getTime()) && !bad) setEd(toLocalInput(new Date(ns.getTime() + (end.getTime() - start.getTime()))));
+    setSd(v);
+  };
+  const row = (): Ev => ({
+    ...ev, title: title.trim(), all_day: allDay, calendar_id: calId,
+    start_at: allDay ? localDateToUtcIso(start) : start.toISOString(), end_at: allDay ? localDateToUtcIso(end) : end.toISOString(),
+  });
+  const save = async () => {
+    if (bad) return;
+    await saveEvent(row());
+    closeAll();
+    if (settings.value.view === "month") selDay.value = startOfDay(start);
+    cursor.value = startOfDay(start);
+    showToast("Evento salvato");
+  };
+  const tog = (k: NonNullable<typeof pick>) => setPick(pick === k ? null : k);
+  return (
+    <>
+      <div class="scrim" onClick={pop} />
+      <div class="sheet quick">
+        <div class="grip" />
+        <div class="qtitle">
+          <input ref={ref} class="inp" placeholder="Titolo" value={title} maxLength={300} onInput={(e) => setTitle((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
+          <button type="button" class="qcal" onClick={() => tog("cal")}><span class="cdot" style={{ background: cal?.color || "#3b82f6" }} />{cal?.name || "Calendario"}</button>
+        </div>
+        {pick === "cal" && (
+          <div class="qcals">{visibleCals.value.map((c) => (
+            <button type="button" class={c.id === calId ? "on" : ""} onClick={() => { setCalId(c.id); setPick(null); }}><span class="cdot" style={{ background: c.color }} />{c.name}</button>
+          ))}</div>
+        )}
+        <div class="qrow">
+          <span class="lab">Tutto il giorno</span>
+          <Switch on={allDay} label="Tutto il giorno" onChange={setAllDay} />
+        </div>
+        <div class="qrow">
+          <span class="lab">Inizio</span>
+          <div class="dt"><DTChip type="date" value={sd.date} on={pick === "sd"} onClick={() => tog("sd")} />
+            {!allDay && <DTChip type="time" value={sd.time} on={pick === "st"} onClick={() => tog("st")} />}</div>
+        </div>
+        {pick === "sd" && <div class="picker q"><DatePick value={sd.date} onChange={(v) => { setStart({ ...sd, date: v }); setPick(null); }} /></div>}
+        {pick === "st" && !allDay && <div class="picker q"><TimeWheel value={sd.time} onChange={(v) => setStart({ ...sd, time: v })} /></div>}
+        <div class="qrow">
+          <span class="lab" style={{ color: bad ? "var(--danger)" : undefined }}>Fine</span>
+          <div class="dt"><DTChip type="date" value={ed.date} on={pick === "ed"} bad={bad} onClick={() => tog("ed")} />
+            {!allDay && <DTChip type="time" value={ed.time} on={pick === "et"} bad={bad} onClick={() => tog("et")} />}</div>
+        </div>
+        {pick === "ed" && <div class="picker q"><DatePick value={ed.date} onChange={(v) => { setEd({ ...ed, date: v }); setPick(null); }} /></div>}
+        {pick === "et" && !allDay && <div class="picker q"><TimeWheel value={ed.time} onChange={(v) => setEd({ ...ed, time: v })} /></div>}
+        <div class="qbtns">
+          <button type="button" class="btn text" onClick={() => replaceTop({ t: "editor", ev: row(), isNew: true })}>Dettagli</button>
+          <div style={{ flex: 1 }} />
+          <button type="button" class="btn" onClick={pop}>Annulla</button>
+          <button type="button" class="btn primary" disabled={bad} onClick={save}>Salva</button>
         </div>
       </div>
     </>

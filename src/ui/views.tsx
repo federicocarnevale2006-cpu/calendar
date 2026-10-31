@@ -4,7 +4,7 @@ import type { Occ } from "../model";
 import { calById, dayOccurrences, newEvent, occurrences, saveEvent, settings, setSettings } from "../store";
 import { holidayName } from "../holidays";
 import { haptic } from "../platform";
-import { cursor, now, push, selDay } from "./state";
+import { cursor, now, push, selDay, width } from "./state";
 import { dragFlag, dragging, editable, LONG_MS, retime, shiftDays, SLOP, snap, STEP_MIN, thump, tick } from "./drag";
 import { Icon } from "./icons";
 
@@ -16,7 +16,8 @@ export function openNew(day: Date, hour?: number) {
   if (hour != null) start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(hour), Math.round((hour % 1) * 60));
   else if (sameDay(day, n)) start = new Date(n.getFullYear(), n.getMonth(), n.getDate(), n.getHours() + 1, 0);
   else start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0);
-  push({ t: "editor", ev: newEvent(start), isNew: true });
+  const ev = newEvent(start);
+  push(width.value < 840 ? { t: "quick", ev } : { t: "editor", ev, isNew: true });     // telefono: pannello rapido come Samsung
 }
 
 /** Scorrimento orizzontale col dito: mese/settimana precedente o successivo. */
@@ -557,7 +558,8 @@ export function WeekView({ days }: { days: 1 | 7 }) {
     setDrag(null);
     if (cancel) return;
     if (d.mode === "new") {
-      push({ t: "editor", ev: { ...newEvent(d.s), end_at: d.e.toISOString() }, isNew: true });
+      const ev = { ...newEvent(d.s), end_at: d.e.toISOString() };
+      push(width.value < 840 ? { t: "quick", ev } : { t: "editor", ev, isNew: true });
       return;
     }
     if (d.occ && (d.s.getTime() !== d.s0.getTime() || d.e.getTime() !== d.e0.getTime())) {
