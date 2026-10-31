@@ -167,7 +167,8 @@ input, textarea, select { font: inherit; color: inherit; }
 .page .ptop h2 { flex: 1; margin: 0 0 0 4px; font-size: 20px; font-weight: 700; }
 .page .pbody { flex: 1; overflow: auto; padding: 4px 14px calc(30px + var(--safe-b)); }
 @media (min-width: 840px) {
-  .sheet, .page.dialog { left: 50%; right: auto; top: 50%; bottom: auto; transform: translate(-50%, -50%); width: 520px; max-height: 86%; border-radius: var(--r); animation: pop .18s ease; box-shadow: var(--shadow); inset: auto; }
+  /* inset prima di left/top: messo dopo li azzerava e la finestra finiva nell'angolo in alto a sinistra, mezza fuori */
+  .sheet, .page.dialog { inset: auto; left: 50%; right: auto; top: 50%; bottom: auto; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: 86%; border-radius: var(--r); animation: pop .18s ease; box-shadow: var(--shadow); }
   .page.dialog { position: fixed; left: 50%; top: 50%; height: auto; background: var(--bg); }
   @keyframes pop { from { transform: translate(-50%, -48%) scale(.98); opacity: 0; } }
 }
@@ -188,7 +189,7 @@ input, textarea, select { font: inherit; color: inherit; }
 .bigtitle { font-size: 22px; font-weight: 600; }
 .dt { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dt input { background: var(--surface2); border: 0; border-radius: 12px; padding: 8px 10px; font-size: 15px; outline: none; min-width: 0; }
-.dt input[type="time"] { width: 104px; }
+.dt input[type="time"] { min-width: 112px; width: auto; }
 select.inp { -webkit-appearance: none; appearance: none; cursor: pointer; }
 .palette { display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 18px 14px; }
 .palette button { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: #fff; }
