@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { addDays, cap, DAYS_SHORT, fmtLongDay, hm, localDateToUtcIso, parseYmd, startOfDay, utcDateToLocal, ymd } from "../date";
+import { addDays, cap, DAYS_SHORT, fmtLongDay, hm, localDateToUtcIso, MONTHS_SHORT, parseYmd, startOfDay, utcDateToLocal, ymd } from "../date";
 import { describeRule, expand, parseRule, ruleToString, uuid, type Cal, type Ev, type Occ, type Rule } from "../model";
 import { APK_URL, APP_VERSION, EXE_URL, PALETTE, SUPABASE_KEY, SUPABASE_URL } from "../config";
 import {
-  calById, cals, createDeviceKey, deleteEvent, evColor, events, evMap, lastSync, pendingCount, saveCal, saveEvent, session, setSettings,
+  calById, cals, createDeviceKey, isHoliday, deleteEvent, evColor, events, evMap, lastSync, pendingCount, saveCal, saveEvent, session, setSettings,
   settings, signOut, syncError, syncState, scheduleSync, visibleCals,
 } from "../store";
 import { autostart, isAndroid, isTauri, openUrl, readTrofeoLink, update, writeTrofeoLink } from "../platform";
@@ -29,6 +29,22 @@ function Page({ title, onClose, children, actions, dialog }: { title: string; on
         <div class="pbody">{children}</div>
       </div>
     </>
+  );
+}
+
+/** Data o ora scritta all'italiana («Sab 31 ott 2026», «20:00»); toccandola si apre il selettore del telefono/PC. */
+function DTField({ type, value, onChange, bad }: { type: "date" | "time"; value: string; onChange: (v: string) => void; bad?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+  let label = value || "—";
+  if (type === "date" && value) {
+    const d = parseYmd(value);
+    label = `${cap(DAYS_SHORT[d.getDay()])} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+  }
+  return (
+    <label class={"dtf " + type + (bad ? " bad" : "")} onClick={() => { try { (ref.current as any)?.showPicker?.(); } catch { /* il browser apre il suo */ } }}>
+      <span>{label}</span>
+      <input ref={ref} type={type} value={value} onInput={(e) => { const v = (e.target as HTMLInputElement).value; if (v) onChange(v); }} />
+    </label>
   );
 }
 
@@ -70,9 +86,11 @@ export function Detail({ occ }: { occ: Occ }) {
       <div class="scrim" onClick={pop} />
       <div class="sheet detail">
         <div class="acts">
-          <button class="iconbtn" aria-label="Duplica" title="Duplica" onClick={dup}><Icon n="copy" /></button>
-          <button class="iconbtn" aria-label="Elimina" title="Elimina" onClick={doDel}><Icon n="trash" /></button>
-          <button class="iconbtn" aria-label="Modifica" title="Modifica" onClick={doEdit}><Icon n="edit" /></button>
+          {!isHoliday(ev) && <>
+            <button class="iconbtn" aria-label="Duplica" title="Duplica" onClick={dup}><Icon n="copy" /></button>
+            <button class="iconbtn" aria-label="Elimina" title="Elimina" onClick={doDel}><Icon n="trash" /></button>
+            <button class="iconbtn" aria-label="Modifica" title="Modifica" onClick={doEdit}><Icon n="edit" /></button>
+          </>}
           <button class="iconbtn" aria-label="Chiudi" onClick={pop}><Icon n="close" /></button>
         </div>
         <div class="head">
@@ -88,6 +106,7 @@ export function Detail({ occ }: { occ: Occ }) {
           {ev.location && <div class="row"><Icon n="place" /><div class="grow lab">{ev.location}</div></div>}
           {ev.notes && <div class="row" style={{ alignItems: "flex-start" }}><Icon n="notes" /><div class="grow lab" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{ev.notes}</div></div>}
           {cal && <div class="row"><Icon n="cal" /><div class="grow lab">{cal.name}</div><span class="cdot" style={{ background: cal.color }} /></div>}
+          {isHoliday(ev) && <div class="row"><Icon n="cal" /><div class="grow lab">Festività nazionale</div><span class="cdot" style={{ background: o.color }} /></div>}
         </div>
       </div>
     </>
@@ -238,8 +257,8 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
           <div style={{ width: "24px" }} />
           <div class="grow"><div class="val" style={{ marginBottom: "6px" }}>Inizio</div>
             <div class="dt">
-              <input type="date" value={sd.date} onInput={(e) => setStart({ ...sd, date: (e.target as HTMLInputElement).value })} />
-              {!allDay && <input type="time" value={sd.time} onInput={(e) => setStart({ ...sd, time: (e.target as HTMLInputElement).value })} />}
+              <DTField type="date" value={sd.date} onChange={(v) => setStart({ ...sd, date: v })} />
+              {!allDay && <DTField type="time" value={sd.time} onChange={(v) => setStart({ ...sd, time: v })} />}
             </div>
           </div>
         </div>
@@ -247,8 +266,8 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
           <div style={{ width: "24px" }} />
           <div class="grow"><div class="val" style={{ marginBottom: "6px", color: bad ? "var(--danger)" : undefined }}>{bad ? "La fine deve venire dopo l'inizio" : "Fine"}</div>
             <div class="dt">
-              <input type="date" value={ed.date} onInput={(e) => setEd({ ...ed, date: (e.target as HTMLInputElement).value })} />
-              {!allDay && <input type="time" value={ed.time} onInput={(e) => setEd({ ...ed, time: (e.target as HTMLInputElement).value })} />}
+              <DTField type="date" value={ed.date} onChange={(v) => setEd({ ...ed, date: v })} bad={bad} />
+              {!allDay && <DTField type="time" value={ed.time} onChange={(v) => setEd({ ...ed, time: v })} bad={bad} />}
             </div>
           </div>
         </div>
@@ -519,6 +538,7 @@ export function SettingsPage() {
         <div class="row"><Icon n="cal" /><div class="grow lab">La settimana inizia di</div>
           <div class="seg"><button class={st.weekStart === 1 ? "on" : ""} onClick={() => setSettings({ weekStart: 1 })}>Lunedì</button><button class={st.weekStart === 0 ? "on" : ""} onClick={() => setSettings({ weekStart: 0 })}>Domenica</button></div></div>
         <div class="row"><Icon n="list" /><div class="grow lab">Numeri delle settimane</div><Switch on={st.weekNumbers} onChange={(v) => setSettings({ weekNumbers: v })} /></div>
+        <div class="row"><Icon n="cal" /><div class="grow"><div class="lab">Festività italiane</div><div class="val">Capodanno, Pasqua, 25 aprile, Natale… in rosso</div></div><Switch on={st.holidays} onChange={(v) => setSettings({ holidays: v })} /></div>
         <div class="row"><Icon n="sun" /><div class="grow lab">Tema</div>
           <div class="seg">{(["system", "light", "dark"] as const).map((t) => <button class={st.theme === t ? "on" : ""} onClick={() => setSettings({ theme: t })}>{t === "system" ? "Auto" : t === "light" ? "Chiaro" : "Scuro"}</button>)}</div></div>
       </div>

@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { addDays, addMonths, cap, dayDiff, DAYS_LETTER, DAYS_SHORT, fmtLongDay, hm, isoWeek, MONTHS, monthWeeks, sameDay, startOfDay, startOfWeek } from "../date";
 import type { Occ } from "../model";
-import { dayOccurrences, newEvent, occurrences, settings, setSettings } from "../store";
+import { calById, dayOccurrences, newEvent, occurrences, saveEvent, settings, setSettings } from "../store";
+import { holidayName } from "../holidays";
 import { haptic } from "../platform";
 import { cursor, now, push, selDay } from "./state";
 import { Icon } from "./icons";
 
-const dayCls = (d: Date) => (d.getDay() === 0 ? "sun" : d.getDay() === 6 ? "sat" : "");
+const dayCls = (d: Date) => (d.getDay() === 0 || (settings.value.holidays && holidayName(d)) ? "sun" : d.getDay() === 6 ? "sat" : "");
 
 export function openNew(day: Date, hour?: number) {
   const n = new Date();
@@ -144,8 +145,7 @@ export function MonthView({ desk }: { desk: boolean }) {
                     {shown.map((s) => {
                       if (s === "span" || s === null) return <div class="chip" style={{ visibility: "hidden" }} />;
                       return (
-                        <div class="chip timed" title={s.ev.title} style={{ "--c": s.color } as any}>
-                          <i style={{ background: s.color }} />
+                        <div class="chip solid" title={s.ev.title} style={{ background: s.color }}>
                           {s.ev.title || "(senza titolo)"}
                         </div>
                       );
@@ -177,6 +177,29 @@ export function DayList({ day }: { day: Date }) {
   return <>{list.map((o) => <EvRow o={o} day={day} />)}</>;
 }
 
+/** Come nel calendario Samsung: in fondo al giorno si scrive il titolo e l'evento e' fatto (ora predefinita, calendario predefinito). */
+export function QuickAdd({ day }: { day: Date }) {
+  const [t, setT] = useState("");
+  const go = () => {
+    const title = t.trim();
+    if (!title) { openNew(day); return; }
+    const n = new Date();
+    const start = sameDay(day, n) ? new Date(n.getFullYear(), n.getMonth(), n.getDate(), n.getHours() + 1, 0) : new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0);
+    const ev = newEvent(start);
+    void saveEvent({ ...ev, title });
+    setT("");
+    void haptic();
+  };
+  const cal = calById.value.get(newEvent(day).calendar_id || "");
+  return (
+    <form class="quickadd" onSubmit={(e) => { e.preventDefault(); go(); }}>
+      <span class="cdot" style={{ background: cal?.color || "var(--accent)" }} />
+      <input class="inp" placeholder={`Aggiungi evento il ${day.getDate()} ${MONTHS[day.getMonth()].slice(0, 3)}`} value={t} onInput={(e) => setT((e.target as HTMLInputElement).value)} enterKeyHint="done" maxLength={300} />
+      <button type="submit" class="iconbtn" aria-label="Aggiungi"><Icon n={t.trim() ? "check" : "plus"} /></button>
+    </form>
+  );
+}
+
 export function DaySheet() {
   const d = selDay.value;
   const sw = useRef<number | null>(null);
@@ -192,6 +215,7 @@ export function DaySheet() {
         <button class="iconbtn" aria-label="Chiudi" onClick={() => (selDay.value = null)}><Icon n="close" /></button>
       </header>
       <div class="list"><DayList day={d} /></div>
+      <QuickAdd day={d} />
     </div>
   );
 }

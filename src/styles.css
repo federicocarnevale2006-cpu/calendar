@@ -191,6 +191,12 @@ input, textarea, select { font: inherit; color: inherit; }
 .dt { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dt input { background: var(--surface2); border: 0; border-radius: 12px; padding: 8px 10px; font-size: 15px; outline: none; min-width: 0; }
 .dt input[type="time"] { min-width: 112px; width: auto; }
+.dtf { position: relative; display: inline-flex; align-items: center; height: 40px; padding: 0 14px; border-radius: 12px; background: var(--surface2); font-size: 15.5px; font-weight: 600; cursor: pointer; }
+.dtf.bad { color: var(--danger); }
+.dtf input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; cursor: pointer; }
+.quickadd { display: flex; align-items: center; gap: 10px; margin: 4px 12px 12px; padding: 4px 4px 4px 14px; border-radius: 22px; background: var(--surface2); flex: none; }
+.quickadd .cdot { width: 10px; height: 10px; flex: none; }
+.quickadd .inp { flex: 1; font-size: 15px; }
 select.inp { -webkit-appearance: none; appearance: none; cursor: pointer; }
 /* l'elenco che si apre: senza un colore esplicito Windows lo disegnava bianco con le scritte bianche (si vedeva solo la voce sotto il mouse) */
 select option, select optgroup { background-color: var(--surface); color: var(--text); }

@@ -1,5 +1,5 @@
 // Differenze fra telefono (Capacitor, Android) e PC (Tauri, Windows). Nel browser semplice tutto questo non fa niente.
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { signal } from "@preact/signals";
 import { APK_URL, APP_BUILD, EXE_URL, VERSION_URL } from "./config";
 import { addDays, hm } from "./date";
@@ -129,6 +129,24 @@ export async function haptic() {
     const { Haptics, ImpactStyle } = await import("@capacitor/haptics");
     await Haptics.impact({ style: ImpactStyle.Light });
   } catch { /* nessuna vibrazione */ }
+}
+
+// ---- widget della schermata Home (Android): l'app passa eventi, festivita' e la chiave per aggiornarsi da soli -----
+const CalWidgets = registerPlugin<{ setData(o: Record<string, unknown>): Promise<void> }>("CalWidgets");
+export async function pushWidgets(data: Record<string, unknown>) {
+  if (!isAndroid) return;
+  try { await CalWidgets.setData(data); } catch (e) { console.warn("widget", e); }
+}
+
+/** Dal widget («+» = nuovo evento): calendario://nuovo */
+export async function onDeepLink(handler: (url: string) => void) {
+  if (!isAndroid) return;
+  const { App } = await import("@capacitor/app");
+  await App.addListener("appUrlOpen", (e) => handler(e.url));
+  try {
+    const l = await App.getLaunchUrl();
+    if (l?.url) handler(l.url);
+  } catch { /* nessun indirizzo d'avvio */ }
 }
 
 /** Tasto indietro di Android: chiude il pannello aperto invece di uscire dall'app. */

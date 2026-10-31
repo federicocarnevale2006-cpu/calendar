@@ -3,7 +3,24 @@ import { createClient, type Session, type RealtimeChannel } from "@supabase/supa
 import { openDB, type IDBPDatabase } from "idb";
 import { SUPABASE_KEY, SUPABASE_URL } from "./config";
 import { expand, uuid, type Cal, type Ev, type Occ } from "./model";
-import { addDays, startOfDay } from "./date";
+import { addDays, localDateToUtcIso, startOfDay } from "./date";
+import { holidayName } from "./holidays";
+
+export const HOLIDAY_COLOR = "#e5484d";
+/** Evento finto (non salvato, non modificabile) per una festivita'. */
+export function isHoliday(e: Ev): boolean { return e.id.startsWith("hol-"); }
+function holidayOccs(from: Date, to: Date): Occ[] {
+  const out: Occ[] = [];
+  for (let d = startOfDay(from); d < to; d = addDays(d, 1)) {
+    const n = holidayName(d);
+    if (!n) continue;
+    const iso = localDateToUtcIso(d);
+    const ev: Ev = { id: "hol-" + iso.slice(0, 10), calendar_id: null, title: n, all_day: true, start_at: iso, end_at: iso, tz: "", location: "", notes: "",
+      color: HOLIDAY_COLOR, rrule: null, exdates: [], reminders: [], deleted: false };
+    out.push({ ev, key: ev.id, start: d, end: addDays(d, 1), allDay: true, color: HOLIDAY_COLOR });
+  }
+  return out;
+}
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "calendario-auth" },
@@ -28,8 +45,9 @@ export interface Settings {
   defaultReminder: number | null;
   defaultDuration: number;      // minuti
   view: "month" | "week" | "day" | "agenda" | "year";
+  holidays: boolean;            // festivita' italiane
 }
-const SETTINGS_DEFAULT: Settings = { weekStart: 1, theme: "system", weekNumbers: false, defaultCal: null, defaultReminder: 15, defaultDuration: 60, view: "month" };
+const SETTINGS_DEFAULT: Settings = { weekStart: 1, theme: "system", weekNumbers: false, defaultCal: null, defaultReminder: 15, defaultDuration: 60, view: "month", holidays: true };
 function loadSettings(): Settings {
   try {
     return { ...SETTINGS_DEFAULT, ...JSON.parse(localStorage.getItem("calendario-settings") || "{}") };
@@ -62,7 +80,8 @@ export function occurrences(from: Date, to: Date): Occ[] {
     occEv = evMap.value;
     occCals = cals.value;
   }
-  const k = `${from.getTime()}_${to.getTime()}`;
+  const withHol = settings.value.holidays;
+  const k = `${from.getTime()}_${to.getTime()}_${withHol ? 1 : 0}`;
   const hit = occCache.get(k);
   if (hit) return hit;
   const hidden = new Set(cals.value.filter((c) => !c.visible || c.deleted).map((c) => c.id));
@@ -71,6 +90,7 @@ export function occurrences(from: Date, to: Date): Occ[] {
     if (e.deleted || (e.calendar_id && hidden.has(e.calendar_id))) continue;
     out.push(...expand(e, from, to, evColor(e)));
   }
+  if (withHol) out.push(...holidayOccs(from, to));
   out.sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.getTime() - b.start.getTime() || (b.end.getTime() - b.start.getTime()) - (a.end.getTime() - a.start.getTime()) || a.ev.title.localeCompare(b.ev.title));
   if (occCache.size > 60) occCache.clear();
   occCache.set(k, out);

@@ -4,4 +4,11 @@
     <string name="title_activity_main">Calendario</string>
     <string name="package_name">app.trofeo.calendario</string>
     <string name="custom_url_scheme">app.trofeo.calendario</string>
+    <string name="widget_new_event">Nuovo evento</string>
+    <string name="widget_month">Mese</string>
+    <string name="widget_agenda">Elenco eventi</string>
+    <string name="widget_today">Oggi</string>
+    <string name="widget_month_desc">Il mese con gli eventi colorati, come nel calendario Samsung</string>
+    <string name="widget_agenda_desc">I prossimi eventi giorno per giorno</string>
+    <string name="widget_today_desc">La data di oggi e il prossimo evento</string>
 </resources>

@@ -1,12 +1,13 @@
 import { useEffect } from "preact/hooks";
 import { addDays, addMonths, cap, fmtLongDay, MONTHS, MONTHS_SHORT, startOfDay, startOfWeek } from "../date";
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
-import { createDeviceKey, evMap, occurrences, ready, session, settings, setSettings } from "../store";
-import { checkUpdate, isTauri, onBack, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, tickTauri, update, writeTrofeoLink } from "../platform";
-import { cursor, overlays, pop, push, selDay, showToast, toast, width, now } from "./state";
+import { calById, cals, createDeviceKey, evColor, evMap, occurrences, ready, session, settings, setSettings } from "../store";
+import { holidaysRange } from "../holidays";
+import { checkUpdate, isAndroid, isTauri, onBack, onDeepLink, pushWidgets, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, tickTauri, update, writeTrofeoLink } from "../platform";
+import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width, now } from "./state";
 import { Icon } from "./icons";
 import { Login } from "./Login";
-import { AgendaView, DayList, DaySheet, MonthView, openNew, WeekView, YearView } from "./views";
+import { AgendaView, DayList, DaySheet, MonthView, openNew, QuickAdd, WeekView, YearView } from "./views";
 import { Calendars, CalToggles, Detail, Drawer, Editor, Scope, Search, SettingsPage, SideMini, TrofeoPage } from "./overlays";
 
 function useTheme() {
@@ -62,6 +63,40 @@ function useTrofeoAutoLink() {
       } catch (e) { console.warn("collegamento Trofeo", e); }
     })();
   }, [s?.user.id]);
+}
+
+/** Android: i widget della schermata Home ricevono gli eventi a ogni modifica e una chiave per aggiornarsi ad app chiusa. */
+function useWidgets() {
+  const s = session.value, m = evMap.value, cs = cals.value, ws = settings.value.weekStart, hol = settings.value.holidays;
+  useEffect(() => {
+    if (!isAndroid || !s) return;
+    void (async () => {
+      const k = "widget-key-" + s.user.id;
+      let key = "";
+      try { key = localStorage.getItem(k) || ""; } catch { /* */ }
+      if (!key) {
+        try { key = await createDeviceKey("Widget Android"); localStorage.setItem(k, key); } catch { return; }   // senza rete: al prossimo avvio
+      }
+      await pushWidgets({ key, url: SUPABASE_URL, anon: SUPABASE_KEY });
+    })();
+  }, [s?.user.id]);
+  useEffect(() => {
+    if (!isAndroid || !s) return;
+    const t = setTimeout(() => {
+      const cut = Date.now() - 45 * 86400000;
+      const rows = [];
+      for (const e of m.values()) {
+        if (e.deleted) continue;
+        const c = calById.value.get(e.calendar_id || "");
+        if (c && (c.deleted || !c.visible)) continue;
+        if (!e.rrule && new Date(e.end_at).getTime() < cut) continue;
+        rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], location: e.location });
+      }
+      const y = new Date().getFullYear();
+      void pushWidgets({ events: JSON.stringify(rows), holidays: JSON.stringify(hol ? holidaysRange(y - 1, y + 2) : {}), weekStart: ws });
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [s?.user.id, m, cs, ws, hol]);
 }
 
 function step(dir: number) {
@@ -193,7 +228,7 @@ function Desk() {
             <div class="daypanel">
               <header><h3>{fmtLongDay(sd)}</h3></header>
               <div class="list"><DayList day={sd} /></div>
-              <div style={{ padding: "0 14px 14px" }}><button class="btn" style={{ width: "100%" }} onClick={() => openNew(sd)}>+ Aggiungi a questo giorno</button></div>
+              <QuickAdd day={sd} />
             </div>
           )}
         </div>
@@ -215,6 +250,10 @@ export function App() {
   useTheme();
   useReminders();
   useTrofeoAutoLink();
+  useWidgets();
+  useEffect(() => {
+    void onDeepLink((url) => { if (url.startsWith("calendario://nuovo")) { closeAll(); openNew(new Date()); } });
+  }, []);
   useEffect(() => {
     const t = setTimeout(() => {
       void checkUpdate().then((u) => {
