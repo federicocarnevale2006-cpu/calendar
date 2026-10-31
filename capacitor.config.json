@@ -1,0 +1,9 @@
+{
+  "appId": "app.trofeo.calendario",
+  "appName": "Calendario",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#f6f6f8" },
+  "plugins": {
+    "LocalNotifications": { "smallIcon": "ic_stat_cal", "iconColor": "#3e7bfa" }
+  }
+}

@@ -1,0 +1,94 @@
+# Compila tutto ad ogni modifica: APK per Android, installazione per Windows, versione web.
+# Poi pubblica sul sito (GitHub Pages) la versione web e i file da scaricare, e crea una Release.
+name: Compila
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: compila
+  cancel-in-progress: true
+
+env:
+  VITE_APP_VERSION: 1.0.${{ github.run_number }}
+  VITE_BUILD: ${{ github.run_number }}
+  BUILD_NUMBER: ${{ github.run_number }}
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npx cap sync android
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: dist
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: npm ci --no-audit --no-fund
+      - name: Installazione Windows
+        shell: bash
+        run: |
+          echo "{\"version\":\"$VITE_APP_VERSION\"}" > src-tauri/tauri.ci.json
+          npx tauri build --config src-tauri/tauri.ci.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exe
+          path: src-tauri/target/release/bundle/nsis/*.exe
+
+  pubblica:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: art }
+      - name: Sito
+        run: |
+          mkdir -p site/download
+          cp -r art/web/. site/
+          cp art/apk/app-release.apk site/download/Calendario.apk
+          cp art/exe/*.exe site/download/Calendario-Setup.exe
+          touch site/.nojekyll
+          echo "{\"version\":\"$VITE_APP_VERSION\",\"build\":$VITE_BUILD}" > site/version.json
+          ls -la site site/download
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: site
+          force_orphan: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VITE_APP_VERSION }}
+          name: Calendario ${{ env.VITE_APP_VERSION }}
+          files: |
+            site/download/Calendario.apk
+            site/download/Calendario-Setup.exe
