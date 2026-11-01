@@ -375,7 +375,7 @@ public final class CalWidgets {
                 Calendar dd = (Calendar) ws.clone();
                 dd.add(Calendar.DAY_OF_MONTH, i);
                 String hn = hol.get(CalData.ymd(dd));
-                if (hn != null) spans.add(new Object[]{i, i, sun, hn});
+                if (hn != null) spans.add(new Object[]{i, i, sun, hn, Boolean.TRUE});
             }
             for (CalData.Occ o : occ) {
                 boolean in = (o.start < b && o.end > a) || (o.start == o.end && o.start >= a && o.start < b);
@@ -385,7 +385,7 @@ public final class CalWidgets {
                 int c0 = Math.max(0, CalData.dayDiff(ws, s));
                 int c1 = Math.min(6, CalData.dayDiff(ws, last));
                 boolean multi = o.allDay || c1 > CalData.dayDiff(ws, CalData.local(o.start));
-                if (multi) spans.add(new Object[]{c0, Math.max(c0, c1), o.ev.color, o.ev.title});
+                if (multi) spans.add(new Object[]{c0, Math.max(c0, c1), o.ev.color, o.ev.title, Boolean.FALSE});
                 else if (c0 >= 0 && c0 < 7) singles.get(c0).add(o);
             }
             for (Object[] s : spans) {
@@ -397,7 +397,11 @@ public final class CalWidgets {
                     lane++;
                 }
                 for (int x = c0; x <= c1; x++) taken[lane][x] = true;
-                bars.add(new Bar(c0, c1, lane, (Integer) s[2], (String) s[3]));
+                bars.add(new Bar(c0, c1, lane, (Integer) s[2], (String) s[3], (Boolean) s[4]));
+            }
+            if (maxLines < 1) {                                          // poco spazio: cerchi colorati dietro i numeri
+                compactRow(ws, bars, singles, hol, pad, y0, cw, rh, month);
+                return;
             }
             float ny = y0 + 15 * d;
             for (int i = 0; i < 7; i++) {
@@ -418,20 +422,6 @@ public final class CalWidgets {
                 cv.drawText(String.valueOf(dd.get(Calendar.DAY_OF_MONTH)), cx, ny, p);
             }
             float ey = y0 + numH;
-            if (maxLines < 1) {                                          // poco spazio: puntini colorati
-                for (int i = 0; i < 7; i++) {
-                    List<Integer> cols = new ArrayList<>();
-                    for (Bar br : bars) if (br.c0 <= i && br.c1 >= i && !cols.contains(br.color)) cols.add(br.color);
-                    for (CalData.Occ o : singles.get(i)) if (!cols.contains(o.ev.color)) cols.add(o.ev.color);
-                    int n = Math.min(3, cols.size());
-                    float cx = pad + cw * (i + 0.5f), r = 2.3f * d, gap = 6 * d;
-                    for (int j = 0; j < n; j++) {
-                        p.setColor(cols.get(j));
-                        cv.drawCircle(cx + (j - (n - 1) / 2f) * gap, ey + 2 * d, r, p);
-                    }
-                }
-                return;
-            }
             float ins = 1.5f * d, rad = 3 * d;
             // barre di piu' giorni
             for (Bar br : bars) {
@@ -473,7 +463,80 @@ public final class CalWidgets {
         static final class Bar {
             final int c0, c1, lane, color;
             final String title;
-            Bar(int c0, int c1, int lane, int color, String title) { this.c0 = c0; this.c1 = c1; this.lane = lane; this.color = color; this.title = title; }
+            final boolean hol;
+            Bar(int c0, int c1, int lane, int color, String title, boolean hol) {
+                this.c0 = c0; this.c1 = c1; this.lane = lane; this.color = color; this.title = title; this.hol = hol;
+            }
+        }
+
+        /**
+         * Widget basso: niente righe con i titoli. Cerchio pieno del colore dell'evento dietro il numero (pillola per gli eventi
+         * di piu' giorni), come il widget di Trofeo LCD. Il cerchio si adatta all'altezza della riga: non tocca mai le altre.
+         */
+        void compactRow(Calendar ws, List<Bar> bars, List<List<CalData.Occ>> singles, Map<String, String> hol, float pad,
+                        float y0, float cw, float rh, int month) {
+            float cy = y0 + rh / 2f;
+            float r = Math.min(Math.min(cw * 0.42f, rh * 0.45f), 13.5f * d);
+            float fs = Math.max(8f, Math.min(12.5f, r * 1.02f / sp));
+            boolean[] covered = new boolean[7];
+            int[] col = new int[7];
+            boolean[] outDay = new boolean[7];
+            boolean[] isToday = new boolean[7];
+            for (int i = 0; i < 7; i++) {
+                Calendar dd = (Calendar) ws.clone();
+                dd.add(Calendar.DAY_OF_MONTH, i);
+                outDay[i] = dd.get(Calendar.MONTH) != month;
+                isToday[i] = dd.get(Calendar.YEAR) == now.get(Calendar.YEAR) && dd.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR);
+            }
+            p.setStyle(Paint.Style.FILL);
+            // eventi di piu' giorni: una pillola (la prima corsia libera vince)
+            for (Bar br : bars) {
+                if (br.hol) continue;
+                boolean free = true;
+                for (int x = br.c0; x <= br.c1; x++) if (covered[x]) { free = false; break; }
+                if (!free) continue;
+                boolean allOut = true;
+                for (int x = br.c0; x <= br.c1; x++) if (!outDay[x]) { allOut = false; break; }
+                p.setColor(allOut ? (br.color & 0x00FFFFFF) | 0x70000000 : br.color);
+                float x0 = pad + cw * (br.c0 + 0.5f) - r, x1 = pad + cw * (br.c1 + 0.5f) + r;
+                cv.drawRoundRect(new RectF(x0, cy - r, x1, cy + r), r, r, p);
+                for (int x = br.c0; x <= br.c1; x++) { covered[x] = true; col[x] = br.color; }
+            }
+            // eventi di un giorno: cerchio
+            for (int i = 0; i < 7; i++) {
+                if (covered[i] || singles.get(i).isEmpty()) continue;
+                int c = singles.get(i).get(0).ev.color;
+                p.setColor(outDay[i] ? (c & 0x00FFFFFF) | 0x70000000 : c);
+                cv.drawCircle(pad + cw * (i + 0.5f), cy, r, p);
+                covered[i] = true;
+                col[i] = c;
+            }
+            // oggi e numeri
+            for (int i = 0; i < 7; i++) {
+                Calendar dd = (Calendar) ws.clone();
+                dd.add(Calendar.DAY_OF_MONTH, i);
+                float cx = pad + cw * (i + 0.5f);
+                if (isToday[i] && !covered[i]) {
+                    p.setStyle(Paint.Style.FILL);
+                    p.setColor(accent);
+                    cv.drawCircle(cx, cy, r, p);
+                } else if (isToday[i]) {                                 // oggi con un evento: anello bianco dentro il cerchio
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(Math.max(1.5f * d, r * 0.13f));
+                    p.setColor(0xFFFFFFFF);
+                    cv.drawCircle(cx, cy, r - Math.max(1.5f * d, r * 0.13f) * 0.5f - 0.5f * d, p);
+                    p.setStyle(Paint.Style.FILL);
+                }
+                int c;
+                if (covered[i]) c = white(col[i]);
+                else if (isToday[i]) c = 0xFFFFFFFF;
+                else if (outDay[i]) c = faint;
+                else c = hol.containsKey(CalData.ymd(dd)) ? sun : dayColor(dd);
+                font(fs, isToday[i] || covered[i], c);
+                p.setTextAlign(Paint.Align.CENTER);
+                Paint.FontMetrics fm = p.getFontMetrics();
+                cv.drawText(String.valueOf(dd.get(Calendar.DAY_OF_MONTH)), cx, cy - (fm.ascent + fm.descent) / 2f, p);
+            }
         }
 
         // ---------------------------------------------------------------------------------- elenco
