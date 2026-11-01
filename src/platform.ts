@@ -154,6 +154,14 @@ export async function onDeepLink(handler: (url: string) => void) {
   } catch { /* nessun indirizzo d'avvio */ }
 }
 
+/** Android: l'app torna in primo piano (piu' affidabile dell'evento del browser). */
+export async function onResume(handler: () => void) {
+  if (!isAndroid) return;
+  const { App } = await import("@capacitor/app");
+  await App.addListener("resume", handler);
+  await App.addListener("appStateChange", (st) => { if (st.isActive) handler(); });
+}
+
 /** Tasto indietro di Android: chiude il pannello aperto invece di uscire dall'app. */
 export async function onBack(handler: () => boolean) {
   if (!isAndroid) return;

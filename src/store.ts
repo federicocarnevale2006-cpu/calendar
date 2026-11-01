@@ -36,6 +36,7 @@ export const syncState = signal<"offline" | "sync" | "ok" | "error">("offline");
 export const syncError = signal("");
 export const lastSync = signal<number>(0);
 export const pendingCount = signal(0);
+export const sentSignal = signal(0);                    // ultima volta che le modifiche in attesa sono partite
 
 export interface Settings {
   weekStart: number;            // 1 = lunedi', 0 = domenica
@@ -185,6 +186,12 @@ const COLS = {
   cals: ["id", "user_id", "name", "color", "visible", "sort", "deleted"],
 };
 let syncing = false, again = false, timer: ReturnType<typeof setTimeout> | null = null;
+export const rejected = signal<string[]>([]);           // modifiche che il server non ha accettato (per le Impostazioni)
+function isNetErr(e: any): boolean {
+  const m = String(e?.message || e || "").toLowerCase();
+  return !e?.code || m.includes("fetch") || m.includes("network") || m.includes("failed") || m.includes("timeout") || m.includes("load");
+}
+let retryMs = 3000;                                      // nuovo tentativo dopo un errore: 3 s, poi sempre piu' tardi (max 60 s)
 let channel: RealtimeChannel | null = null;
 
 export function scheduleSync(ms = 0) {
@@ -211,7 +218,18 @@ async function push(uid: string) {
       }
       if (rows.length) {
         const { error } = await supabase.from(TABLE[table]).upsert(rows, { onConflict: "id" });
-        if (error) throw new Error(error.message);
+        if (error) {
+          if (isNetErr(error)) throw new Error(error.message);
+          // il server ha rifiutato il gruppo: si riprova riga per riga, cosi' una sola riga sbagliata non blocca le altre
+          for (const r of rows) {
+            const one = await supabase.from(TABLE[table]).upsert([r], { onConflict: "id" });
+            if (one.error) {
+              if (isNetErr(one.error)) throw new Error(one.error.message);
+              console.warn("riga rifiutata dal server, tolta dalla coda", table, r.id, one.error.message);
+              rejected.value = [...rejected.value.slice(-9), `${one.error.message}`];
+            }
+          }
+        }
       }
       for (const it of chunk) {                                 // tolto dalla coda solo se nel frattempo non e' cambiato di nuovo
         const cur = await d.get("outbox", it.k);
@@ -270,19 +288,23 @@ export async function sync() {
   const s = session.value;
   if (!s || DEMO) return;
   if (syncing) { again = true; return; }
-  if (typeof navigator !== "undefined" && navigator.onLine === false) { syncState.value = "offline"; return; }
   syncing = true;
   syncState.value = "sync";
+  const hadPending = pendingCount.value;
   try {
     await push(s.user.id);
     await pull();
     syncState.value = "ok";
     syncError.value = "";
     lastSync.value = Date.now();
+    retryMs = 3000;
+    if (hadPending && !pendingCount.value) sentSignal.value = Date.now();   // «modifiche inviate» (l'interfaccia lo dice)
   } catch (e: any) {
-    syncState.value = "error";
+    const off = typeof navigator !== "undefined" && navigator.onLine === false;
+    syncState.value = off || isNetErr(e) ? "offline" : "error";
     syncError.value = String(e?.message || e);
-    scheduleSync(15000);
+    scheduleSync(retryMs);
+    retryMs = Math.min(60000, retryMs * 2);
   } finally {
     syncing = false;
     if (again) { again = false; scheduleSync(200); }
@@ -337,8 +359,13 @@ export async function init() {
   ready.value = true;
   window.addEventListener("online", () => scheduleSync(0));
   window.addEventListener("offline", () => { syncState.value = "offline"; });
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleSync(0); });
-  setInterval(() => { if (!document.hidden) scheduleSync(0); }, 120000);
+  // tornando all'app si sincronizza; uscendo, se ci sono modifiche in attesa si prova a inviarle subito (prima che il
+  // telefono chiuda l'app)
+  document.addEventListener("visibilitychange", () => { if (!document.hidden || pendingCount.value) scheduleSync(0); });
+  // ogni minuto si controlla comunque il server: se il collegamento in tempo reale si e' perso (PC in sospensione, rete
+  // cambiata) le modifiche fatte sul telefono arrivano lo stesso. Sul PC anche a finestra chiusa (aggiorna Trofeo LCD).
+  const isPC = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  setInterval(() => { if (isPC || !document.hidden || pendingCount.value) scheduleSync(0); }, 60000);
 }
 
 export async function signOut() {

@@ -1,9 +1,9 @@
 import { useEffect } from "preact/hooks";
 import { addDays, addMonths, cap, fmtLongDay, MONTHS, MONTHS_SHORT, startOfDay, startOfWeek } from "../date";
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
-import { calById, cals, createDeviceKey, evColor, evMap, occurrences, ready, session, settings, setSettings } from "../store";
+import { calById, cals, createDeviceKey, evColor, evMap, occurrences, pendingCount, ready, scheduleSync, sentSignal, session, settings, setSettings, syncState } from "../store";
 import { holidaysRange } from "../holidays";
-import { checkUpdate, isAndroid, isTauri, onBack, onDeepLink, pushWidgets, writeTrofeoEvents, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, tickTauri, update, writeTrofeoLink } from "../platform";
+import { checkUpdate, isAndroid, isTauri, onBack, onDeepLink, onResume, pushWidgets, writeTrofeoEvents, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, tickTauri, update, writeTrofeoLink } from "../platform";
 import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width, now } from "./state";
 import { Icon } from "./icons";
 import { Login } from "./Login";
@@ -203,6 +203,11 @@ function Phone() {
         <div class="top">
           <button class="iconbtn" aria-label="Menu" onClick={() => push({ t: "drawer" })}><Icon n="menu" /></button>
           <Title desk={false} />
+          {pendingCount.value > 0 && (
+            <button class="pending" onClick={() => scheduleSync(0)} title="Modifiche non ancora inviate: tocca per riprovare">
+              <Icon n="sync" s />{pendingCount.value}{syncState.value === "offline" ? " · senza rete" : ""}
+            </button>
+          )}
           <button class="iconbtn" aria-label="Cerca" onClick={() => push({ t: "search" })}><Icon n="search" /></button>
           <button class="iconbtn todaybtn" aria-label="Oggi" onClick={goToday}><Icon n="cal" /><span class="num">{todayNum}</span></button>
         </div>
@@ -279,6 +284,11 @@ export function App() {
   useTrofeoAutoLink();
   useWidgets();
   useTrofeoEvents();
+  useEffect(() => {
+    void onResume(() => scheduleSync(0));
+  }, []);
+  const sent = sentSignal.value;
+  useEffect(() => { if (sent) showToast("Modifiche inviate: ora si vedono anche sugli altri dispositivi"); }, [sent]);
   useEffect(() => {
     void onDeepLink((url) => { if (url.startsWith("calendario://nuovo")) { closeAll(); openNew(new Date()); } });
   }, []);
