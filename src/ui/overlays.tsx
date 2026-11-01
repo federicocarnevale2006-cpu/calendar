@@ -4,13 +4,13 @@ import { addDays, cap, DAYS_SHORT, fmtLongDay, hm, localDateToUtcIso, MONTHS_SHO
 import { describeRule, expand, parseRule, ruleToString, uuid, type Cal, type Ev, type Occ, type Rule } from "../model";
 import { APK_URL, APP_VERSION, EXE_URL, PALETTE, SUPABASE_KEY, SUPABASE_URL } from "../config";
 import {
-  calById, cals, createDeviceKey, isHoliday, deleteEvent, evColor, events, evMap, lastSync, pendingCount, saveCal, saveEvent, session, setSettings,
+  calById, cals, createDeviceKey, createShiftKey, isHoliday, deleteEvent, evColor, events, evMap, lastSync, pendingCount, saveCal, saveEvent, session, setSettings,
   settings, signOut, supabase, syncError, syncState, scheduleSync, visibleCals,
 } from "../store";
 import { autostart, autoUpdatePC, isAndroid, isTauri, nativePushStatus, openUrl, pcUpdate, readTrofeoLink, restartApp, update, writeTrofeoLink, type PushStatus } from "../platform";
 import { cursor, now, pop, push, replaceTop, selDay, showToast, closeAll } from "./state";
 import { Icon } from "./icons";
-import { gmailScript, SHIFT_SENDER } from "../gmailScript";
+import { GMAIL_MANIFEST, gmailScript, SHIFT_SENDER } from "../gmailScript";
 import { MiniMonth } from "./views";
 
 // ------------------------------------------------------------------------------------------------ elementi comuni
@@ -789,7 +789,7 @@ export function TrofeoPage() {
 }
 
 // --------------------------------------------------------------------------------------------- turni dalla mail
-interface ShiftImport { at: string; subject: string | null; rest: number; days: number; added: number; removed: number; range_from: string | null; range_to: string | null }
+interface ShiftImport { at: string; rest: number; days: number; added: number; removed: number; range_from: string | null; range_to: string | null }
 export function ShiftsPage() {
   const [rem, setRemV] = useState<number | null>(() => {
     try { const v = localStorage.getItem("shift-rem"); return v === null ? 1440 : v === "" ? null : Number(v); } catch { return 1440; }
@@ -800,51 +800,63 @@ export function ShiftsPage() {
   const [err, setErr] = useState("");
   const [log, setLog] = useState<ShiftImport[] | null>(null);
   const loadLog = async () => {
-    const { data, error } = await supabase.from("shift_imports").select("at,subject,rest,days,added,removed,range_from,range_to").order("at", { ascending: false }).limit(3);
+    const { data, error } = await supabase.from("shift_imports").select("at,rest,days,added,removed,range_from,range_to").order("at", { ascending: false }).limit(3);
     setLog(error ? [] : (data as ShiftImport[]));
   };
   useEffect(() => { void loadLog(); const iv = setInterval(() => void loadLog(), 20000); return () => clearInterval(iv); }, []);
   const prepare = async () => {
     setBusy(true); setErr("");
     try {
-      const key = await createDeviceKey("Gmail (turni)", true);
+      const key = await createShiftKey();
       const txt = gmailScript(key, rem == null ? -99999 : rem);
       setScript(txt);
       await copyText(txt);
-      showToast("Script copiato: ora incollalo in Google Apps Script");
+      showToast("Script copiato: incollalo in Google Apps Script");
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
+  const copyManifest = async () => { await copyText(GMAIL_MANIFEST); showToast("Impostazioni copiate: incollale in appsscript.json"); };
   const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} alle ${hm(d)}`; };
   const day = (s: string | null) => { if (!s) return ""; const d = parseYmd(s); return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`; };
   return (
     <Page title="Turni dalla mail" dialog>
       <div class="card">
         <div class="row"><Icon n="notes" /><div class="grow"><div class="lab">Giorni di riposo automatici</div>
-          <div class="val">Quando arriva la mail dei turni da {SHIFT_SENDER}, i riposi finiscono da soli nel calendario «Turni». Funziona anche con telefono e PC spenti.</div></div></div>
+          <div class="val">Quando arriva la mail dei turni da {SHIFT_SENDER}, i riposi finiscono da soli nel calendario «Turni». A fine mese si cancellano da soli.</div></div></div>
         <button type="button" class="row click" onClick={() => push({ t: "rem", allDay: true, value: rem, none: true, onPick: (v) => { setRem(v); setScript(null); } })}>
           <Icon n="bell" /><div class="grow"><div class="lab">Promemoria per i riposi</div><div class="val">{rem == null ? "Nessuno" : remLabel(rem, true)}</div></div><Icon n="right" />
         </button>
       </div>
       <div class="card">
-        <div class="row"><div class="grow"><div class="lab">Ultime mail importate</div>
+        <div class="row"><div class="grow"><div class="lab">Ultime importazioni</div>
           {log === null ? <div class="val">…</div> : !log.length ? <div class="val">Nessuna finora</div> : log.map((l) => (
             <div class="val">{fmt(l.at)} · {l.rest === 1 ? "1 riposo" : `${l.rest} riposi`}{l.range_from ? ` (${day(l.range_from)} – ${day(l.range_to)})` : ""}{l.added || l.removed ? ` · ${l.added} aggiunti, ${l.removed} tolti` : ""}</div>
           ))}</div></div>
       </div>
+      <div class="card privacy">
+        <div class="row"><Icon n="person" /><div class="grow"><div class="lab">Privacy</div></div></div>
+        <ul>
+          <li>Lo script gira <b>solo nel tuo account Google</b>: nessun altro legge la tua posta.</li>
+          <li>Ha il permesso di Gmail in <b>sola lettura</b> e cerca solo le mail del mittente dei turni: non può scrivere, inviare o cancellare mail.</li>
+          <li>Al calendario arrivano <b>solo le date dei riposi</b>: niente testo, oggetto, nomi o orari della mail.</li>
+          <li>La chiave dello script può <b>solo aggiungere riposi</b>: non legge e non modifica gli altri eventi.</li>
+          <li>Il calendario sta sul tuo spazio Supabase in Europa (Francoforte), con connessione cifrata, visibile solo dal tuo account.</li>
+        </ul>
+      </div>
       <div class="card steps">
         <div class="lab" style={{ padding: "12px 14px 4px" }}>Da fare una volta sola (meglio dal PC)</div>
         <ol>
-          <li><b>Copia lo script</b> (contiene la chiave per scrivere in questo calendario){script ? " — fatto, è negli appunti" : ""}.
-            <div><button class="btn primary" disabled={busy} onClick={prepare}>{script ? "Copia di nuovo" : "Copia lo script"}</button></div></li>
-          <li><b>Apri Google Apps Script</b> con il tuo account Gmail: si crea un progetto nuovo.
-            <div><button class="btn" onClick={() => void openUrl("https://script.google.com/home/projects/create")}>Apri script.google.com</button></div></li>
-          <li><b>Incolla</b>: cancella il testo che c'è, incolla (Ctrl+V) e salva (icona del dischetto o Ctrl+S).</li>
-          <li><b>Attiva</b>: in alto, accanto a «▶ Esegui», scegli la funzione <b>installa</b> e premi <b>Esegui</b>.</li>
-          <li><b>Dai il permesso</b>: «Rivedi autorizzazioni» → il tuo account → «Avanzate» → «Vai a Progetto senza titolo (non sicuro)» → «Consenti». Lo script è tuo e lo vedi tutto: legge solo le mail dei turni.</li>
-          <li>Nel registro in basso compare «Fatto»: da ora le mail dei turni vengono controllate <b>ogni 10 minuti</b> e qui sopra vedi le importazioni.</li>
+          <li><b>Hai già lo script della versione prima?</b> Toglili il permesso completo su Gmail: apri la pagina dei collegamenti di Google, scegli «Progetto senza titolo» (o il nome che gli hai dato) e rimuovi l'accesso. Poi continua nello stesso progetto.
+            <div><button class="btn" onClick={() => void openUrl("https://myaccount.google.com/connections")}>Apri collegamenti Google</button></div></li>
+          <li><b>Copia lo script</b> e incollalo in Google Apps Script al posto di tutto il testo (file «Codice.gs»), poi salva.
+            <div class="btnrow"><button class="btn primary" disabled={busy} onClick={prepare}>{script ? "Copia di nuovo" : "Copia lo script"}</button>
+              <button class="btn" onClick={() => void openUrl("https://script.google.com/home")}>Apri script.google.com</button></div></li>
+          <li><b>Gmail in sola lettura</b>: in Apps Script apri «Impostazioni progetto» (ingranaggio a sinistra) e spunta «Mostra il file manifest "appsscript.json" nell'editor». Torna all'editor, apri <b>appsscript.json</b>, cancella tutto, incolla le impostazioni e salva.
+            <div><button class="btn" onClick={copyManifest}>Copia le impostazioni</button></div></li>
+          <li><b>Attiva</b>: in alto scegli la funzione <b>installa</b> e premi <b>Esegui</b>. Google chiede il permesso («Avanzate» → «Vai al progetto» → «Consenti»): deve dire <b>«Visualizzare i tuoi messaggi email»</b>. Se chiede di leggere, inviare ed eliminare le mail, le impostazioni del punto 3 non sono state salvate.</li>
+          <li>Nel registro compare «Fatto»: da ora le mail dei turni vengono controllate <b>ogni 10 minuti</b>.</li>
         </ol>
         {script && <textarea class="inp code" readOnly rows={5} value={script} onFocus={(e) => (e.target as HTMLTextAreaElement).select()} />}
-        <div class="note">Se cambi il promemoria, copia di nuovo lo script e sostituiscilo nel progetto. Le mail aggiornate con un riposo spostato correggono da sole il calendario.</div>
+        <div class="note">Se cambi il promemoria, copia di nuovo lo script e sostituiscilo nel progetto.</div>
       </div>
       {err && <div class="note" style={{ color: "var(--danger)" }}>{err}</div>}
     </Page>

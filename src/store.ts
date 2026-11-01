@@ -461,6 +461,13 @@ export async function createDeviceKey(name: string, write = false): Promise<stri
   return data as string;
 }
 
+/** Chiave per lo script di Gmail: puo' SOLO importare i riposi (non legge e non modifica gli altri eventi). */
+export async function createShiftKey(): Promise<string> {
+  const { data, error } = await supabase.rpc("create_shift_key");
+  if (error) throw new Error(error.message);
+  return data as string;
+}
+
 /** Abilita alla scrittura la chiave del telefono (per l'invio ad app chiusa). false = chiave non piu' esistente. */
 export async function enableDeviceWrite(key: string): Promise<boolean> {
   const { data, error } = await supabase.rpc("enable_device_write", { p_key: key });

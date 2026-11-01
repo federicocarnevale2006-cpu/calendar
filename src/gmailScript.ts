@@ -5,8 +5,11 @@ import { SUPABASE_KEY, SUPABASE_URL } from "./config";
 
 export const SHIFT_SENDER = "turni@azienda.com";
 
-const TEMPLATE = String.raw`// Calendario · turni dalla mail
+const TEMPLATE = String.raw`// Calendario · turni dalla mail (versione con Gmail in SOLA LETTURA)
 // Ogni 10 minuti cerca le mail dei turni e mette nel calendario i giorni di riposo, con un promemoria.
+// Privacy: lo script gira solo nel tuo account Google. Legge solo le mail del mittente dei turni (permesso di sola
+// lettura: non puo' scrivere, inviare o cancellare mail) e al calendario manda SOLO le date dei giorni di riposo:
+// niente testo della mail, oggetto, nomi o orari.
 // Per attivarlo: qui sopra scegli la funzione «installa» e premi ▶ Esegui (la prima volta Google chiede il permesso).
 
 const CHIAVE = "__CHIAVE__";
@@ -27,32 +30,54 @@ function installa() {
 function controllaTurni() {
   var props = PropertiesService.getScriptProperties();
   var fatte = JSON.parse(props.getProperty("fatte") || "[]");
-  var msgs = [];
-  GmailApp.search("from:" + MITTENTE + " newer_than:120d", 0, 40).forEach(function (t) {
-    t.getMessages().forEach(function (m) { msgs.push(m); });
-  });
-  msgs.sort(function (a, b) { return a.getDate() - b.getDate(); });   // dalla piu' vecchia: vince l'ultima mail
+  var elenco = Gmail.Users.Messages.list("me", { q: "from:" + MITTENTE + " newer_than:120d", maxResults: 40 });
+  var msgs = (elenco.messages || [])
+    .filter(function (m) { return fatte.indexOf(m.id) < 0; })
+    .map(function (m) { return Gmail.Users.Messages.get("me", m.id, { format: "full" }); });
+  msgs.sort(function (a, b) { return Number(a.internalDate) - Number(b.internalDate); });   // dalla piu' vecchia: vince l'ultima
   var n = 0;
   msgs.forEach(function (m) {
-    var id = m.getId();
-    if (fatte.indexOf(id) >= 0) return;
-    if (String(m.getFrom()).toLowerCase().indexOf(MITTENTE.toLowerCase()) < 0) return;
-    var giorni = leggiTurni(m.getBody(), m.getPlainBody());
-    if (!giorni.length) { fatte.push(id); return; }                     // mail senza la tabella dei turni
+    if (intestazione(m, "From").toLowerCase().indexOf(MITTENTE.toLowerCase()) < 0) { fatte.push(m.id); return; }
+    var corpo = testoMail(m.payload);
+    var giorni = leggiTurni(corpo.html, corpo.text).map(function (g) { return { date: g.date, rest: g.rest }; });
+    if (!giorni.length) { fatte.push(m.id); return; }                   // mail senza la tabella dei turni
     var r = UrlFetchApp.fetch(SERVER, {
       method: "post", contentType: "application/json", headers: { apikey: APIKEY }, muteHttpExceptions: true,
-      payload: JSON.stringify({ p_key: CHIAVE, p_days: giorni, p_reminder: PROMEMORIA, p_msg: id, p_subject: m.getSubject() })
+      payload: JSON.stringify({ p_key: CHIAVE, p_days: giorni, p_reminder: PROMEMORIA })
     });
     if (r.getResponseCode() !== 200) {                                  // si riprova al prossimo giro
       Logger.log("Non riuscito (" + r.getResponseCode() + "): " + r.getContentText());
       return;
     }
-    Logger.log(m.getSubject() + ": " + r.getContentText());
-    fatte.push(id);
+    Logger.log("Turni letti: " + r.getContentText());
+    fatte.push(m.id);
     n++;
   });
   props.setProperty("fatte", JSON.stringify(fatte.slice(-300)));
   return n;
+}
+
+function intestazione(m, nome) {
+  var h = (m.payload && m.payload.headers) || [];
+  for (var i = 0; i < h.length; i++) if (String(h[i].name).toLowerCase() === nome.toLowerCase()) return String(h[i].value || "");
+  return "";
+}
+
+// testo della mail (parti HTML e testo semplice)
+function testoMail(p) {
+  var out = { html: "", text: "" };
+  (function giro(x) {
+    if (!x) return;
+    var tipo = String(x.mimeType || "").toLowerCase();
+    if (x.body && x.body.data && (tipo === "text/html" || tipo === "text/plain")) {
+      var d = x.body.data;
+      var b = typeof d === "string" ? Utilities.newBlob(Utilities.base64DecodeWebSafe(d)) : Utilities.newBlob(d);
+      var s = b.getDataAsString("UTF-8");
+      if (tipo === "text/html") out.html += s; else out.text += s;
+    }
+    (x.parts || []).forEach(giro);
+  })(p);
+  return out;
 }
 
 // Righe della tabella: «Mon 02/11/2026 B&M Riposo», «Tue 03/11/2026 B&M 14:00-18:00 09:30-13:30»
@@ -100,6 +125,19 @@ function righe(t) {
   return out;
 }
 `;
+
+/** Impostazioni del progetto (appsscript.json): Gmail in SOLA LETTURA e nient'altro. */
+export const GMAIL_MANIFEST = JSON.stringify({
+  timeZone: "Europe/Rome",
+  runtimeVersion: "V8",
+  exceptionLogging: "STACKDRIVER",
+  dependencies: { enabledAdvancedServices: [{ userSymbol: "Gmail", serviceId: "gmail", version: "v1" }] },
+  oauthScopes: [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.scriptapp",
+  ],
+}, null, 2);
 
 /** Lo script completo, con la chiave del dispositivo e il promemoria scelto (minuti prima delle 9:00 del giorno). */
 export function gmailScript(key: string, reminder = 1440): string {

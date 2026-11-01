@@ -387,3 +387,6 @@ textarea.inp.code { display: block; width: calc(100% - 36px); resize: none; font
 /* pannelli aperti sopra una pagina (editor, impostazioni): sopra la pagina */
 .scrim.top { z-index: 50; }
 .remsheet, .choicesheet { z-index: 51; }
+.privacy ul { margin: 0 0 10px; padding: 0 18px 0 58px; display: grid; gap: 8px; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+.privacy ul b { color: var(--text); font-weight: 600; }
+.steps .btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
