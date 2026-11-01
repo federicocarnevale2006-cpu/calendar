@@ -46,6 +46,16 @@ public class WidgetsPlugin extends Plugin {
         call.resolve();
     }
 
+    /** Stato dell'invio ad app chiusa (per le Impostazioni). */
+    @PluginMethod
+    public void pushStatus(PluginCall call) {
+        try {
+            call.resolve(JSObject.fromJSONObject(CalPush.status(getContext().getApplicationContext())));
+        } catch (Exception e) {
+            call.resolve(new JSObject());
+        }
+    }
+
     /** Cosa e' gia' partito da Android ad app chiusa (l'app lo toglie dalla sua coda). */
     @PluginMethod
     public void takeSent(PluginCall call) {

@@ -13,6 +13,8 @@ export const APK_URL = REL + "Calendario.apk";
 export const EXE_URL = REL + "Calendario.exe";           // un solo file, senza installazione (come Trofeo LCD)
 // numero dell'ultima versione pubblicata (file scritto dalla compilazione)
 export const VERSION_URL = "https://raw.githubusercontent.com/federicocarnevale2006-cpu/calendar/gh-pages/version.json";
+// stesso file .exe della Release, ma da un indirizzo che l'app per PC puo' scaricare da sola (aggiornamento automatico)
+export const EXE_RAW_URL = "https://raw.githubusercontent.com/federicocarnevale2006-cpu/calendar/gh-pages/download/Calendario.exe";
 
 export const PALETTE = [
   "#3b82f6", "#0ea5e9", "#14b8a6", "#22c55e", "#84cc16", "#eab308",

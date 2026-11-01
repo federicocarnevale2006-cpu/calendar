@@ -74,18 +74,60 @@ public final class CalPush {
         }
     }
 
+    /** Annota lo stato (per la riga «Invio ad app chiusa» nelle Impostazioni dell'app). */
+    static void note(Context ctx, String k, String v) {
+        prefs(ctx).edit().putString(k, v).putLong(k + "_t", System.currentTimeMillis()).apply();
+    }
+
     static void schedule(Context ctx, long delayMs) {
+        JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+        if (js == null) { note(ctx, "sched", "JobScheduler non disponibile"); return; }
         try {
-            JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
-            if (js == null) return;
             JobInfo job = new JobInfo.Builder(JOB_ID, new ComponentName(ctx, PushJob.class))
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)       // parte da solo quando torna la rete
                     .setMinimumLatency(delayMs)
-                    .setBackoffCriteria(20000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+                    .setBackoffCriteria(10000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
                     .setPersisted(true)                                      // resta anche dopo un riavvio del telefono
                     .build();
+            int r = js.schedule(job);
+            note(ctx, "sched", r == JobScheduler.RESULT_SUCCESS ? "ok" : "rifiutato da Android");
+            if (r == JobScheduler.RESULT_SUCCESS) return;
+        } catch (Exception e) {
+            note(ctx, "sched", "errore: " + e);
+        }
+        // riserva: senza la condizione "rete presente" (parte comunque e, se manca la rete, riprova da solo piu' tardi)
+        try {
+            JobInfo job = new JobInfo.Builder(JOB_ID, new ComponentName(ctx, PushJob.class))
+                    .setMinimumLatency(delayMs)
+                    .setOverrideDeadline(delayMs + 60000)
+                    .setBackoffCriteria(15000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+                    .build();
             js.schedule(job);
+            note(ctx, "sched2", "ok");
+        } catch (Exception e) {
+            note(ctx, "sched2", "errore: " + e);
+        }
+    }
+
+    /** Stato per l'app: modifiche in attesa, lavoro programmato, ultimo tentativo. */
+    static JSONObject status(Context ctx) {
+        JSONObject o = new JSONObject();
+        try {
+            SharedPreferences p = prefs(ctx);
+            synchronized (LOCK) { o.put("pending", obj(p, "pending").length()); }
+            boolean sched = false;
+            if (android.os.Build.VERSION.SDK_INT >= 24) {
+                JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+                sched = js != null && js.getPendingJob(JOB_ID) != null;
+            }
+            o.put("scheduled", sched);
+            for (String k : new String[]{"sched", "sched2", "run", "ok"}) {
+                o.put(k, p.getString(k, ""));
+                o.put(k + "_t", p.getLong(k + "_t", 0));
+            }
+            o.put("hasKey", !CalWidgets.prefs(ctx).getString("key", "").isEmpty());
         } catch (Exception ignored) { }
+        return o;
     }
 
     static void cancel(Context ctx) {
@@ -104,7 +146,10 @@ public final class CalPush {
         JSONObject pend;
         synchronized (LOCK) { pend = obj(p, "pending"); }
         if (pend.length() == 0) return RESULT_DONE;
-        if (key.isEmpty() || url.isEmpty()) return RESULT_DONE;              // senza chiave: inviera' l'app alla riapertura
+        if (key.isEmpty() || url.isEmpty()) {                                // senza chiave: inviera' l'app alla riapertura
+            note(ctx, "run", "manca la chiave del telefono");
+            return RESULT_DONE;
+        }
         if (url.endsWith("/")) url = url.substring(0, url.length() - 1);
 
         List<JSONObject> ops = new ArrayList<>();
@@ -140,8 +185,10 @@ public final class CalPush {
                 if (code != 200) {
                     if (txt.contains("chiave non valida")) {                 // chiave tolta o senza permesso: ci pensa l'app
                         synchronized (LOCK) { p.edit().putBoolean("keyBad", true).commit(); }
+                        note(ctx, "run", "chiave rifiutata dal server");
                         return RESULT_DONE;
                     }
+                    note(ctx, "run", "server: risposta " + code);
                     return RESULT_RETRY;                                     // server non raggiungibile: si riprova
                 }
                 JSONObject res = new JSONObject(txt);
@@ -168,13 +215,16 @@ public final class CalPush {
                 }
                 any = true;
             } catch (Exception e) {
+                note(ctx, "run", "rete: " + e.getClass().getSimpleName());
                 return RESULT_RETRY;
             } finally {
                 if (con != null) con.disconnect();
             }
         }
-        if (any) {                                                           // widget della Home aggiornati dal server
-            CalWidgets.prefs(ctx).edit().putLong("fetched", 0).apply();
+        if (any) {
+            note(ctx, "run", "inviato");
+            note(ctx, "ok", String.valueOf(ops.size()));
+            CalWidgets.prefs(ctx).edit().putLong("fetched", 0).apply();     // widget della Home aggiornati dal server
             CalWidgets.maybeFetch(ctx);
             CalWidgets.updateAll(ctx);
         }

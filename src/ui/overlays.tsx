@@ -7,7 +7,7 @@ import {
   calById, cals, createDeviceKey, isHoliday, deleteEvent, evColor, events, evMap, lastSync, pendingCount, saveCal, saveEvent, session, setSettings,
   settings, signOut, syncError, syncState, scheduleSync, visibleCals,
 } from "../store";
-import { autostart, isAndroid, isTauri, openUrl, readTrofeoLink, update, writeTrofeoLink } from "../platform";
+import { autostart, autoUpdatePC, isAndroid, isTauri, nativePushStatus, openUrl, pcUpdate, readTrofeoLink, restartApp, update, writeTrofeoLink, type PushStatus } from "../platform";
 import { cursor, now, pop, push, replaceTop, selDay, showToast, closeAll } from "./state";
 import { Icon } from "./icons";
 import { MiniMonth } from "./views";
@@ -692,6 +692,49 @@ export function TrofeoPage() {
 }
 
 // -------------------------------------------------------------------------------------------------- impostazioni
+/** Android: stato dell'invio delle modifiche ad app chiusa (per capire subito se qualcosa non va). */
+function PushStatusRow() {
+  const [st, setSt] = useState<PushStatus | null>(null);
+  const load = () => void nativePushStatus().then(setSt);
+  useEffect(() => { load(); const iv = setInterval(load, 3000); return () => clearInterval(iv); }, []);
+  if (!st) return null;
+  const at = (t?: number) => (t ? new Date(t).toLocaleString("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
+  const n = st.pending || 0;
+  let txt: string;
+  if (!st.hasKey) txt = "Non ancora attivo: apri l'app con la rete una volta";
+  else if (st.sched && st.sched !== "ok" && st.sched2 !== "ok") txt = `Problema: ${st.sched}`;
+  else if (n) txt = `${n === 1 ? "1 modifica" : `${n} modifiche`} in attesa: partono da sole appena c'è rete${st.run ? ` · ultimo tentativo ${at(st.run_t)}: ${st.run}` : ""}`;
+  else if (st.ok_t) txt = `Attivo · ultimo invio ad app chiusa: ${at(st.ok_t)}`;
+  else txt = "Attivo: le modifiche fatte senza rete partono da sole quando torna, anche ad app chiusa";
+  return (
+    <div class="card">
+      <div class="row"><Icon n="sync" /><div class="grow"><div class="lab">Invio ad app chiusa</div><div class="val">{txt}</div></div></div>
+    </div>
+  );
+}
+
+/** PC: stato dell'aggiornamento automatico (tocca per controllare subito o per riavviare con la versione nuova). */
+function PcUpdateRow() {
+  const u = pcUpdate.value;
+  const txt = !u ? `Versione ${APP_VERSION} · si aggiorna da sola (tocca per controllare ora)`
+    : u.state === "download" ? `Scaricamento della versione ${u.version}…`
+    : u.state === "ready" ? `Versione ${u.version} installata: tocca per riavviare`
+    : `Versione ${u.version}: non riuscito, si riprova fra poco (tocca per riprovare)`;
+  const go = () => {
+    if (u?.state === "ready") { void restartApp(); return; }
+    if (u?.state === "download") return;
+    void autoUpdatePC().then((st) => {
+      if (st === "none") showToast(`Hai già l'ultima versione (${APP_VERSION})`);
+      else if (st === "ready" && pcUpdate.value) showToast(`Versione ${pcUpdate.value.version} installata`, { label: "Riavvia", run: () => void restartApp() });
+    }).catch((e) => showToast(`Aggiornamento non riuscito: ${String(e?.message || e)}`));
+  };
+  return (
+    <div class="card">
+      <button class="row click" onClick={go}><Icon n="sync" /><div class="grow"><div class="lab">Aggiornamenti automatici</div><div class="val">{txt}</div></div>{u?.state === "ready" && <Icon n="right" />}</button>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const st = settings.value;
   const [auto, setAuto] = useState<boolean | null>(null);
@@ -730,6 +773,8 @@ export function SettingsPage() {
           </select></div>
         {isTauri && auto !== null && <div class="row"><Icon n="monitor" /><div class="grow"><div class="lab">Avvia con Windows</div><div class="val">Nell'area di notifica, per i promemoria</div></div><Switch on={auto} onChange={(v) => void autostart(v).then(setAuto)} /></div>}
       </div>
+      {isTauri && <PcUpdateRow />}
+      {isAndroid && <PushStatusRow />}
       {update.value && (
         <div class="card">
           <button class="row click" onClick={() => void openUrl(update.value!.url)}><Icon n="sync" /><div class="grow"><div class="lab">Aggiornamento disponibile</div><div class="val">Versione {update.value.version}: tocca per scaricarla e installarla</div></div><Icon n="right" /></button>

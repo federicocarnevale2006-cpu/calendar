@@ -1,7 +1,7 @@
 // Differenze fra telefono (Capacitor, Android) e PC (Tauri, Windows). Nel browser semplice tutto questo non fa niente.
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { signal } from "@preact/signals";
-import { APK_URL, APP_BUILD, EXE_URL, SUPABASE_KEY, SUPABASE_URL, VERSION_URL } from "./config";
+import { APK_URL, APP_BUILD, APP_VERSION, EXE_RAW_URL, EXE_URL, SUPABASE_KEY, SUPABASE_URL, VERSION_URL } from "./config";
 import { addDays, hm } from "./date";
 import type { Occ } from "./model";
 
@@ -116,6 +116,68 @@ export async function checkUpdate(): Promise<boolean> {
   return false;
 }
 
+// ---- PC: aggiornamento automatico (come Trofeo LCD) ------------------------------------------------------------
+// L'app scarica da sola il file .exe nuovo, controlla l'impronta SHA-256 pubblicata dalla compilazione e lo passa al
+// programma, che lo mette al posto di quello vecchio. Con la finestra chiusa (area di notifica) si riavvia subito;
+// con la finestra aperta chiede «Riavvia» (o si riavvia da sola quando la si chiude).
+export const pcUpdate = signal<{ version: string; state: "download" | "ready" | "error"; msg?: string } | null>(null);
+let pcBusy = false;
+async function sha256hex(buf: ArrayBuffer): Promise<string> {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
+  return Array.from(h, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+/** "none" niente di nuovo, "ready" installata (serve il riavvio), "restarting" si riavvia da sola, "manual" va scaricata a mano. */
+export async function autoUpdatePC(): Promise<"none" | "ready" | "restarting" | "manual"> {
+  if (!isTauri || pcBusy || pcUpdate.value?.state === "ready") return "none";
+  pcBusy = true;
+  try {
+    const r = await fetch(VERSION_URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error("controllo non riuscito");
+    const j = await r.json();
+    if (!(Number(j.build) > APP_BUILD)) return "none";
+    const version = String(j.version || "");
+    if (!j.exe_sha256 || typeof crypto === "undefined" || !crypto.subtle) {
+      update.value = { version, url: EXE_URL };
+      return "manual";
+    }
+    pcUpdate.value = { version, state: "download" };
+    const res = await fetch(EXE_RAW_URL + "?b=" + j.build, { cache: "no-store" });
+    if (!res.ok) throw new Error("scaricamento non riuscito");
+    const ab = await res.arrayBuffer();
+    if ((await sha256hex(ab)) !== String(j.exe_sha256).toLowerCase()) throw new Error("file non ancora pronto sul server");
+    const buf = new Uint8Array(ab);
+    const { invoke } = await import("@tauri-apps/api/core");
+    const visible = (await invoke("install_update", buf)) as boolean;
+    pcUpdate.value = { version, state: "ready" };
+    return visible ? "ready" : "restarting";
+  } catch (e: any) {
+    const v = pcUpdate.value?.version;
+    pcUpdate.value = v ? { version: v, state: "error", msg: String(e?.message || e) } : null;
+    throw e;
+  } finally {
+    pcBusy = false;
+  }
+}
+export async function restartApp() {
+  if (!isTauri) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("restart_app");
+}
+/** La versione appena installata funziona: il file vecchio si puo' togliere. Ritorna la versione precedente se e' appena cambiata. */
+export async function confirmUpdate(): Promise<string | null> {
+  if (!isTauri) return null;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("confirm_update");
+  } catch { /* versione senza aggiornamento automatico */ }
+  let prev: string | null = null;
+  try {
+    prev = localStorage.getItem("app-version");
+    localStorage.setItem("app-version", APP_VERSION);
+  } catch { /* */ }
+  return prev && prev !== APP_VERSION ? prev : null;
+}
+
 /** Apre un indirizzo nel browser del sistema (non dentro l'app). */
 export async function openUrl(url: string) {
   if (isTauri) {
@@ -141,7 +203,17 @@ const CalWidgets = registerPlugin<{
   setData(o: Record<string, unknown>): Promise<void>;
   setPending(o: { ops: unknown[]; url: string; anon: string }): Promise<void>;
   takeSent(): Promise<{ sent?: Record<string, number>; keyBad?: boolean }>;
+  pushStatus(): Promise<PushStatus>;
 }>("CalWidgets");
+export interface PushStatus {
+  pending?: number; scheduled?: boolean; hasKey?: boolean;
+  sched?: string; sched_t?: number; sched2?: string; sched2_t?: number; run?: string; run_t?: number; ok?: string; ok_t?: number;
+}
+/** Stato dell'invio ad app chiusa (Impostazioni). */
+export async function nativePushStatus(): Promise<PushStatus | null> {
+  if (!isAndroid) return null;
+  try { return await CalWidgets.pushStatus(); } catch { return null; }
+}
 export async function pushWidgets(data: Record<string, unknown>) {
   if (!isAndroid) return;
   try { await CalWidgets.setData(data); } catch (e) { console.warn("widget", e); }

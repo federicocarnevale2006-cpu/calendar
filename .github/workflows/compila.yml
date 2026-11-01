@@ -81,13 +81,13 @@ jobs:
           # stesso file anche col nome vecchio: le versioni 1.0.1-1.0.3 cercano «Calendario-Setup.exe» per aggiornarsi
           cp art/exe/calendario.exe site/download/Calendario-Setup.exe
           touch site/.nojekyll
-          echo "{\"version\":\"$VITE_APP_VERSION\",\"build\":$VITE_BUILD}" > site/version.json
+          # impronte SHA-256: l'app per PC controlla il file scaricato prima di mettersi al posto del vecchio
+          EXE_SHA=$(sha256sum site/download/Calendario.exe | cut -d' ' -f1)
+          APK_SHA=$(sha256sum site/download/Calendario.apk | cut -d' ' -f1)
+          echo "{\"version\":\"$VITE_APP_VERSION\",\"build\":$VITE_BUILD,\"exe_sha256\":\"$EXE_SHA\",\"apk_sha256\":\"$APK_SHA\"}" > site/version.json
+          cat site/version.json
           ls -la site site/download
-      - uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: site
-          force_orphan: true
+      # prima la Release, poi il sito con version.json: quando le app vedono la versione nuova, i file ci sono gia'
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VITE_APP_VERSION }}
@@ -96,3 +96,8 @@ jobs:
             site/download/Calendario.apk
             site/download/Calendario.exe
             site/download/Calendario-Setup.exe
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: site
+          force_orphan: true

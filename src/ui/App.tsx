@@ -1,9 +1,9 @@
 import { useEffect } from "preact/hooks";
 import { addDays, addMonths, cap, fmtLongDay, MONTHS, MONTHS_SHORT, startOfDay, startOfWeek } from "../date";
-import { SUPABASE_KEY, SUPABASE_URL } from "../config";
+import { APP_VERSION, SUPABASE_KEY, SUPABASE_URL } from "../config";
 import { calById, cals, createDeviceKey, enableDeviceWrite, evColor, evMap, occurrences, pendingCount, pushKeyBad, ready, scheduleSync, sentSignal, session, settings, setSettings, syncState } from "../store";
 import { holidaysRange } from "../holidays";
-import { checkUpdate, isAndroid, isTauri, onBack, onDeepLink, onResume, pushWidgets, writeTrofeoEvents, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, tickTauri, update, writeTrofeoLink } from "../platform";
+import { autoUpdatePC, checkUpdate, confirmUpdate, isAndroid, isTauri, onBack, onDeepLink, onResume, pushWidgets, writeTrofeoEvents, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, pcUpdate, restartApp, tickTauri, update, writeTrofeoLink } from "../platform";
 import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width, now } from "./state";
 import { Icon } from "./icons";
 import { Login } from "./Login";
@@ -311,12 +311,33 @@ export function App() {
     void onDeepLink((url) => { if (url.startsWith("calendario://nuovo")) { closeAll(); openNew(new Date()); } });
   }, []);
   useEffect(() => {
+    if (isTauri) return;                                       // il PC si aggiorna da solo (sotto)
     const t = setTimeout(() => {
       void checkUpdate().then((u) => {
         if (u && update.value) showToast(`Nuova versione ${update.value.version} disponibile`, { label: "Scarica", run: () => void openUrl(update.value!.url) });
       });
     }, 4000);
     return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    if (!isTauri) return;
+    // la versione nuova e' partita bene (il file vecchio si toglie); se e' appena cambiata lo si dice
+    const c = setTimeout(() => {
+      void confirmUpdate().then((prev) => { if (prev) showToast(`Calendario aggiornato alla versione ${APP_VERSION}`); });
+    }, 5000);
+    let next: ReturnType<typeof setTimeout> | null = null;
+    const run = () => {
+      void autoUpdatePC().then((st) => {
+        if (st === "ready" && pcUpdate.value) showToast(`Versione ${pcUpdate.value.version} installata`, { label: "Riavvia", run: () => void restartApp() });
+        else if (st === "manual" && update.value) showToast(`Nuova versione ${update.value.version} disponibile`, { label: "Scarica", run: () => void openUrl(update.value!.url) });
+        next = setTimeout(run, 3 * 3600000);                   // controllo ogni 3 ore
+      }).catch((e) => {
+        console.warn("aggiornamento automatico", e);
+        next = setTimeout(run, 15 * 60000);                    // non riuscito: si riprova fra 15 minuti
+      });
+    };
+    next = setTimeout(run, 8000);
+    return () => { clearTimeout(c); if (next) clearTimeout(next); };
   }, []);
   useEffect(() => {
     void onBack(() => {
