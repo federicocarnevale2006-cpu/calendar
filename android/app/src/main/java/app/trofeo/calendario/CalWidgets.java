@@ -173,13 +173,9 @@ public final class CalWidgets {
 
     static void updateOne(Context ctx, AppWidgetManager mgr, int id, int type) {
         try {
-            Bundle o = mgr.getAppWidgetOptions(id);
-            int wdp = o != null ? o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) : 0;
-            int hdp = o != null ? o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) : 0;
-            if (wdp <= 0) wdp = type == TODAY ? 170 : 320;
-            if (hdp <= 0) hdp = type == MONTH ? 330 : (type == AGENDA ? 220 : 170);
+            float[] sz = widgetSize(ctx, mgr.getAppWidgetOptions(id), type);
             float d = ctx.getResources().getDisplayMetrics().density;
-            float w = wdp * d, h = hdp * d;
+            float w = sz[0] * d, h = sz[1] * d;
             float k = (float) Math.min(1.0, Math.sqrt(5_500_000.0 / (w * h * 4)));   // limite di memoria delle immagini dei widget
             Bitmap bmp = Bitmap.createBitmap(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)), Bitmap.Config.ARGB_8888);
             Canvas cv = new Canvas(bmp);
@@ -188,12 +184,47 @@ public final class CalWidgets {
             else if (type == AGENDA) pt.agenda();
             else pt.today();
             RemoteViews rv = new RemoteViews(ctx.getPackageName(), R.layout.widget_image);
+            // sfondo: forma a parte che riempie sempre il widget (stesso colore e trasparenza di prima)
+            rv.setInt(R.id.widget_bg, "setColorFilter", pt.bg | 0xFF000000);
+            rv.setInt(R.id.widget_bg, "setImageAlpha", pt.bg >>> 24);
             rv.setImageViewBitmap(R.id.widget_img, bmp);
             rv.setOnClickPendingIntent(R.id.widget_img, openApp(ctx, null, 100 + type));
             if (type == TODAY) rv.setViewVisibility(R.id.widget_add, View.GONE);
             else rv.setOnClickPendingIntent(R.id.widget_add, openApp(ctx, "calendario://nuovo", 200 + type));
             mgr.updateAppWidget(id, rv);
         } catch (Exception ignored) { }
+    }
+
+    /**
+     * Misura del widget in dp per l'orientamento attuale. Da Android 12 il launcher da' l'elenco delle misure vere
+     * (verticale e orizzontale): si prende quella piu' alta in verticale, la piu' larga in orizzontale. Prima di Android 12:
+     * verticale = larghezza minima x altezza massima, orizzontale = larghezza massima x altezza minima.
+     */
+    static float[] widgetSize(Context ctx, Bundle o, int type) {
+        boolean land = ctx.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        float w = 0, h = 0;
+        if (o != null && android.os.Build.VERSION.SDK_INT >= 31) {
+            try {
+                ArrayList<android.util.SizeF> list = o.getParcelableArrayList(AppWidgetManager.OPTION_APPWIDGET_SIZES);
+                if (list != null) {
+                    for (android.util.SizeF s : list) {
+                        if (s == null || s.getWidth() <= 0 || s.getHeight() <= 0) continue;
+                        float r = s.getHeight() / s.getWidth();
+                        boolean better = w <= 0 || (land ? r < h / w : r > h / w);
+                        if (better) { w = s.getWidth(); h = s.getHeight(); }
+                    }
+                }
+            } catch (Exception ignored) { w = 0; h = 0; }
+        }
+        if (w <= 0 || h <= 0) {
+            if (o != null) {
+                w = o.getInt(land ? AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH : AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0);
+                h = o.getInt(land ? AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT : AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0);
+            }
+            if (w <= 0) w = type == TODAY ? 170 : 320;
+            if (h <= 0) h = type == MONTH ? 330 : (type == AGENDA ? 220 : 170);
+        }
+        return new float[]{w, h};
     }
 
     static PendingIntent openApp(Context ctx, String uri, int req) {
@@ -254,11 +285,8 @@ public final class CalWidgets {
             weekStart = prefs(ctx).getInt("weekStart", 1);
         }
 
+        /** Lo sfondo ora e' una forma a parte nel layout (riempie sempre il widget): nell'immagine solo il contenuto. */
         void background() {
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(bg);
-            float r = 22 * d;
-            cv.drawRoundRect(new RectF(0, 0, W, H), r, r, p);
         }
 
         void font(float size, boolean bold, int color) {

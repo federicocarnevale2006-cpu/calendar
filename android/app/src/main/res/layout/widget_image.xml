@@ -1,15 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Widget disegnato come immagine (stile calendario Samsung) + zona trasparente in alto a destra per «Nuovo evento» -->
+<!-- Widget disegnato come immagine (stile calendario Samsung) + zona trasparente in alto a destra per «Nuovo evento».
+     Lo sfondo e' una forma a parte che riempie tutto il widget; il disegno sopra mantiene le proporzioni (fitCenter):
+     se il launcher dichiara una misura un po' diversa da quella vera, i cerchi restano cerchi e non diventano ovali. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
     <ImageView
-        android:id="@+id/widget_img"
+        android:id="@+id/widget_bg"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="fitXY"
+        android:src="@drawable/widget_bg"
+        android:importantForAccessibility="no" />
+
+    <ImageView
+        android:id="@+id/widget_img"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitCenter"
         android:contentDescription="@string/app_name" />
 
     <ImageView
