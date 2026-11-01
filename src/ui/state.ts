@@ -11,7 +11,10 @@ export type Overlay =
   | { t: "settings" }
   | { t: "calendars"; add?: boolean }
   | { t: "drawer" }
-  | { t: "trofeo" };
+  | { t: "trofeo" }
+  | { t: "rem"; allDay: boolean; start?: Date; value: number | null; onPick: (m: number | null) => void; none?: boolean }
+  | { t: "choice"; title: string; options: [string, string][]; value: string; onPick: (v: string) => void }
+  | { t: "shifts" };
 
 export const cursor = signal<Date>(startOfDay(new Date()));
 export const selDay = signal<Date | null>(null);

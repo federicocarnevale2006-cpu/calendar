@@ -5,11 +5,12 @@ import { describeRule, expand, parseRule, ruleToString, uuid, type Cal, type Ev,
 import { APK_URL, APP_VERSION, EXE_URL, PALETTE, SUPABASE_KEY, SUPABASE_URL } from "../config";
 import {
   calById, cals, createDeviceKey, isHoliday, deleteEvent, evColor, events, evMap, lastSync, pendingCount, saveCal, saveEvent, session, setSettings,
-  settings, signOut, syncError, syncState, scheduleSync, visibleCals,
+  settings, signOut, supabase, syncError, syncState, scheduleSync, visibleCals,
 } from "../store";
 import { autostart, autoUpdatePC, isAndroid, isTauri, nativePushStatus, openUrl, pcUpdate, readTrofeoLink, restartApp, update, writeTrofeoLink, type PushStatus } from "../platform";
 import { cursor, now, pop, push, replaceTop, selDay, showToast, closeAll } from "./state";
 import { Icon } from "./icons";
+import { gmailScript, SHIFT_SENDER } from "../gmailScript";
 import { MiniMonth } from "./views";
 
 // ------------------------------------------------------------------------------------------------ elementi comuni
@@ -45,7 +46,7 @@ function DTChip({ type, value, on, bad, onClick }: { type: "date" | "time"; valu
 
 const IH = 40;                                         // altezza di una voce della rotella
 /** Rotella che scorre col dito e si ferma sulla voce (come il selettore dell'ora Samsung), con vibrazione a ogni scatto. */
-function Wheel({ n, value, onChange }: { n: number; value: number; onChange: (v: number) => void }) {
+function Wheel({ n, value, onChange, labels, w }: { n: number; value: number; onChange: (v: number) => void; labels?: string[]; w?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [cur, setCur] = useState(value);
   const t = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -69,10 +70,10 @@ function Wheel({ n, value, onChange }: { n: number; value: number; onChange: (v:
     }, 110);
   };
   return (
-    <div class="wheel" ref={ref} onScroll={onScroll}>
+    <div class={"wheel" + (labels ? " txt" : "")} ref={ref} onScroll={onScroll} style={w ? { width: `${w}px` } : undefined}>
       <div style={{ height: `${IH * 2}px` }} />
       {Array.from({ length: n }, (_, i) => (
-        <div class={"wi" + (i === cur ? " on" : "")} onClick={() => ref.current?.scrollTo({ top: i * IH, behavior: "smooth" })}>{String(i).padStart(2, "0")}</div>
+        <div class={"wi" + (i === cur ? " on" : "")} onClick={() => ref.current?.scrollTo({ top: i * IH, behavior: "smooth" })}>{labels ? labels[i] : String(i).padStart(2, "0")}</div>
       ))}
       <div style={{ height: `${IH * 2}px` }} />
     </div>
@@ -114,13 +115,111 @@ function DatePick({ value, onChange }: { value: string; onChange: (v: string) =>
 }
 const MONTHS_FULL = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
 
-export const REMINDERS: [number, string][] = [[0, "All'ora dell'evento"], [5, "5 minuti prima"], [10, "10 minuti prima"], [15, "15 minuti prima"],
-  [30, "30 minuti prima"], [60, "1 ora prima"], [120, "2 ore prima"], [1440, "1 giorno prima"], [2880, "2 giorni prima"], [10080, "1 settimana prima"]];
-const REM_ALLDAY: [number, string][] = [[0, "Il giorno stesso alle 9:00"], [1440, "Il giorno prima alle 9:00"], [2880, "2 giorni prima alle 9:00"], [10080, "1 settimana prima alle 9:00"]];
+// Promemoria = minuti prima dell'inizio (per «tutto il giorno»: prima delle 9:00 del giorno). Qualsiasi valore, scelto con le rotelle.
+const UNITS: [number, string, string][] = [[1, "minuto", "minuti"], [60, "ora", "ore"], [1440, "giorno", "giorni"], [10080, "settimana", "settimane"]];
+const MAXN = 120, MAXD = 60;
+function splitTimed(m: number): [number, number] {                     // [quanti, unita']
+  if (m <= 0) return [0, 0];
+  for (let u = 3; u >= 1; u--) if (m % UNITS[u][0] === 0 && m / UNITS[u][0] <= MAXN) return [m / UNITS[u][0], u];
+  return [Math.min(MAXN, m), 0];
+}
+function splitAllDay(m: number): [number, number] {                    // [giorni prima, minuti dalla mezzanotte]
+  let t = 540 - m, d = 0;
+  while (t < 0) { t += 1440; d++; }
+  while (t >= 1440) { t -= 1440; d--; }
+  return [Math.max(0, d), t];
+}
+const hhmm = (t: number) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
 export function remLabel(m: number, allDay: boolean): string {
-  const l = (allDay ? REM_ALLDAY : REMINDERS).find((x) => x[0] === m);
-  if (l) return l[1];
-  return m % 1440 === 0 ? `${m / 1440} giorni prima` : m % 60 === 0 ? `${m / 60} ore prima` : `${m} minuti prima`;
+  if (allDay) {
+    const [d, t] = splitAllDay(m);
+    return `${d === 0 ? "Il giorno stesso" : d === 1 ? "Il giorno prima" : `${d} giorni prima`} alle ${hhmm(t)}`;
+  }
+  if (m <= 0) return "All'ora dell'evento";
+  const [n, u] = splitTimed(m);
+  return `${n} ${n === 1 ? UNITS[u][1] : UNITS[u][2]} prima`;
+}
+/** Quando arriva l'avviso (per l'anteprima). */
+function remAt(start: Date, allDay: boolean, m: number): Date {
+  const base = allDay ? new Date(start.getFullYear(), start.getMonth(), start.getDate(), 9, 0) : start;
+  return new Date(base.getTime() - m * 60000);
+}
+const NUM_LABELS = Array.from({ length: MAXN + 1 }, (_, i) => String(i));
+const DAY_LABELS = Array.from({ length: MAXD + 1 }, (_, i) => (i === 0 ? "Il giorno stesso" : i === 1 ? "1 giorno prima" : `${i} giorni prima`));
+
+/** Scelta da un elenco nello stile dell'app (al posto del menu di sistema). */
+export function ChoiceSheet({ title, options, value, onPick }: { title: string; options: [string, string][]; value: string; onPick: (v: string) => void }) {
+  return (
+    <>
+      <div class="scrim top" onClick={pop} />
+      <div class="sheet choicesheet" role="dialog" aria-label={title}>
+        <div class="grip" />
+        <div class="chtitle">{title}</div>
+        <div class="chlist">
+          {options.map(([v, l]) => (
+            <button type="button" class={"chopt" + (v === value ? " on" : "")} onClick={() => { pop(); if (v !== value) onPick(v); }}>
+              <span class="grow">{l}</span>{v === value && <Icon n="check" />}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+function Choice({ cls, title, value, options, onPick }: { cls: string; title: string; value: string; options: [string, string][]; onPick: (v: string) => void }) {
+  const label = options.find((o) => o[0] === value)?.[1] ?? "";
+  return <button type="button" class={cls + " choice"} onClick={() => push({ t: "choice", title, options, value, onPick })}>{label}<span class="chev">▾</span></button>;
+}
+
+/** Pannello per scegliere il promemoria: quanto prima, con le rotelle (nessuna lista fissa). */
+export function RemSheet({ allDay, start, value, onPick, none }: { allDay: boolean; start?: Date; value: number | null; onPick: (m: number | null) => void; none?: boolean }) {
+  const init = value ?? (allDay ? 1440 : 15);
+  const [a, setA] = useState(() => (allDay ? splitAllDay(init)[0] : splitTimed(init)[0]));
+  const [u, setU] = useState(() => splitTimed(init)[1]);
+  const [h, setH] = useState(() => Math.floor(splitAllDay(init)[1] / 60));
+  const [mi, setMi] = useState(() => splitAllDay(init)[1] % 60);
+  const m = allDay ? a * 1440 + 540 - (h * 60 + mi) : a * UNITS[u][0];
+  const at = start && !isNaN(start.getTime()) ? remAt(start, allDay, m) : null;
+  const past = at ? at.getTime() < Date.now() : false;
+  const done = (v: number | null) => { pop(); onPick(v); };
+  return (
+    <>
+      <div class="scrim top" onClick={pop} />
+      <div class="sheet remsheet" role="dialog" aria-label="Promemoria">
+        <div class="grip" />
+        <div class="remhead">
+          <Icon n="bell" />
+          <div class="grow">
+            <div class="remval">{remLabel(m, allDay)}</div>
+            {at && <div class={"remwhen" + (past ? " past" : "")}>{past ? "Già passato: " : "Avviso "}{DAYS_SHORT[at.getDay()]} {at.getDate()} {MONTHS_SHORT[at.getMonth()]} alle {hm(at)}</div>}
+          </div>
+        </div>
+        {allDay ? (
+          <div class="twheel rem">
+            <div class="band" />
+            <Wheel n={MAXD + 1} value={a} onChange={setA} labels={DAY_LABELS} w={170} />
+            <span class="alle">alle</span>
+            <Wheel n={24} value={h} onChange={setH} w={56} />
+            <span class="sep">:</span>
+            <Wheel n={60} value={mi} onChange={setMi} w={56} />
+          </div>
+        ) : (
+          <div class="twheel rem">
+            <div class="band" />
+            <Wheel n={MAXN + 1} value={a} onChange={setA} labels={NUM_LABELS} w={70} />
+            <Wheel n={4} value={u} onChange={setU} labels={UNITS.map((x) => (a === 1 ? x[1] : x[2]))} w={130} />
+            <span class="alle">prima</span>
+          </div>
+        )}
+        <div class="rembtns">
+          {none && <button class="btn" onClick={() => done(null)}>Nessuno</button>}
+          <span class="grow" />
+          <button class="btn" onClick={pop}>Annulla</button>
+          <button class="btn primary" onClick={() => done(m)}>{value == null ? "Aggiungi" : "Fatto"}</button>
+        </div>
+      </div>
+    </>
+  );
 }
 
 export function whenText(o: Occ): string {
@@ -350,6 +449,7 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
   const [notes, setNotes] = useState(ev.notes);
   const [showColors, setShowColors] = useState(false);
   const [showRepeat, setShowRepeat] = useState(false);
+  const [showCals, setShowCals] = useState(false);
   const [pick, setPick] = useState<null | "sd" | "st" | "ed" | "et">(null);   // selettore aperto (data/ora di inizio/fine)
   const tog = (k: "sd" | "st" | "ed" | "et") => setPick(pick === k ? null : k);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -405,7 +505,6 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
     [`Ogni mese il giorno ${start.getDate() || 1}`, { freq: "MONTHLY", interval: 1, byday: [], until: null, count: null }],
     ["Ogni anno", { freq: "YEARLY", interval: 1, byday: [], until: null, count: null }],
   ];
-  const remOpts = allDay ? REM_ALLDAY : REMINDERS;
   return (
     <Page title={isNew ? "Nuovo evento" : "Modifica evento"} dialog actions={<button class="btn primary" style={{ height: "40px", marginRight: "6px" }} disabled={bad} onClick={save}>Salva</button>}>
       <div class="card">
@@ -456,21 +555,26 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
           <Icon n="bell" />
           <div class="grow">
             <div class="lab" style={{ marginBottom: "8px" }}>Promemoria</div>
-            {rem.map((m) => <button class="pill on" onClick={() => setRem(rem.filter((x) => x !== m))}>{remLabel(m, allDay)} <span class="x">✕</span></button>)}
-            <select class="pill" style={{ border: 0 }} value="" onChange={(e) => { const v = parseInt((e.target as HTMLSelectElement).value); if (!isNaN(v)) setRem([...new Set([...rem, v])]); }}>
-              <option value="">+ Aggiungi</option>
-              {remOpts.filter(([m]) => !rem.includes(m)).map(([m, l]) => <option value={m}>{l}</option>)}
-            </select>
+            {rem.slice().sort((a, b) => a - b).map((m) => (
+              <span class="pill on rempill">
+                <button type="button" class="remedit" onClick={() => push({ t: "rem", allDay, start, value: m, onPick: (v) => { if (v != null) setRem((r) => [...new Set(r.map((x) => (x === m ? v : x)))]); } })}>{remLabel(m, allDay)}</button>
+                <button type="button" class="x" aria-label="Togli promemoria" onClick={() => setRem((r) => r.filter((x) => x !== m))}>✕</button>
+              </span>
+            ))}
+            <button type="button" class="pill addrem" onClick={() => push({ t: "rem", allDay, start, value: null, onPick: (v) => { if (v != null) setRem((r) => [...new Set([...r, v])]); } })}><Icon n="plus" s /> Aggiungi</button>
           </div>
         </div>
       </div>
       <div class="card">
-        <div class="row"><Icon n="cal" />
-          <select class="inp grow" value={calId || ""} onChange={(e) => setCalId((e.target as HTMLSelectElement).value || null)}>
-            {visibleCals.value.map((c) => <option value={c.id}>{c.name}</option>)}
-          </select>
+        <button type="button" class="row click" onClick={() => setShowCals(!showCals)}><Icon n="cal" />
+          <div class="grow lab">{cal?.name || "Calendario"}</div>
           <span class="cdot" style={{ background: cal?.color || "#999" }} />
-        </div>
+        </button>
+        {showCals && (
+          <div class="qcals ed">{visibleCals.value.map((c) => (
+            <button type="button" class={c.id === calId ? "on" : ""} onClick={() => { setCalId(c.id); setShowCals(false); }}><span class="cdot" style={{ background: c.color }} />{c.name}</button>
+          ))}</div>
+        )}
         <div class="row"><Icon n="place" /><input class="inp grow" placeholder="Luogo" value={loc} onInput={(e) => setLoc((e.target as HTMLInputElement).value)} maxLength={300} /></div>
         <div class="row" style={{ alignItems: "flex-start" }}><Icon n="notes" />
           <textarea class="inp grow" rows={3} placeholder="Note" value={notes} onInput={(e) => setNotes((e.target as HTMLTextAreaElement).value)} maxLength={5000} style={{ resize: "vertical" }} />
@@ -499,12 +603,8 @@ function RepeatEditor({ rule, setRule, start, opts }: { rule: Rule | null; setRu
         <div style={{ marginTop: "8px", display: "grid", gap: "10px" }}>
           <div class="dt">Ogni
             <input type="number" min={1} max={99} value={rule.interval} style={{ width: "70px" }} onInput={(e) => setRule({ ...rule, interval: Math.max(1, Math.min(99, parseInt((e.target as HTMLInputElement).value) || 1)) })} />
-            <select class="pill" style={{ border: 0, margin: 0 }} value={rule.freq} onChange={(e) => setRule({ ...rule, freq: (e.target as HTMLSelectElement).value as Rule["freq"], byday: [] })}>
-              <option value="DAILY">{rule.interval > 1 ? "giorni" : "giorno"}</option>
-              <option value="WEEKLY">{rule.interval > 1 ? "settimane" : "settimana"}</option>
-              <option value="MONTHLY">{rule.interval > 1 ? "mesi" : "mese"}</option>
-              <option value="YEARLY">{rule.interval > 1 ? "anni" : "anno"}</option>
-            </select>
+            <Choice cls="pill" title="Ripeti ogni" value={rule.freq} onPick={(v) => setRule({ ...rule, freq: v as Rule["freq"], byday: [] })}
+              options={[["DAILY", rule.interval > 1 ? "giorni" : "giorno"], ["WEEKLY", rule.interval > 1 ? "settimane" : "settimana"], ["MONTHLY", rule.interval > 1 ? "mesi" : "mese"], ["YEARLY", rule.interval > 1 ? "anni" : "anno"]]} />
           </div>
           {rule.freq === "WEEKLY" && (
             <div>{order.map((d) => {
@@ -517,12 +617,9 @@ function RepeatEditor({ rule, setRule, start, opts }: { rule: Rule | null; setRu
             })}</div>
           )}
           <div class="dt">Termina
-            <select class="pill" style={{ border: 0, margin: 0 }} value={rule.until ? "u" : rule.count ? "c" : "n"} onChange={(e) => {
-              const v = (e.target as HTMLSelectElement).value;
-              setRule({ ...rule, until: v === "u" ? ymd(addDays(start, 30)) : null, count: v === "c" ? 10 : null });
-            }}>
-              <option value="n">mai</option><option value="u">il giorno…</option><option value="c">dopo un numero di volte</option>
-            </select>
+            <Choice cls="pill" title="Termina" value={rule.until ? "u" : rule.count ? "c" : "n"}
+              onPick={(v) => setRule({ ...rule, until: v === "u" ? ymd(addDays(start, 30)) : null, count: v === "c" ? 10 : null })}
+              options={[["n", "mai"], ["u", "il giorno…"], ["c", "dopo un numero di volte"]]} />
             {rule.until && <input type="date" value={rule.until} onInput={(e) => setRule({ ...rule, until: (e.target as HTMLInputElement).value || null })} />}
             {rule.count && <><input type="number" min={1} max={999} value={rule.count} style={{ width: "80px" }} onInput={(e) => setRule({ ...rule, count: Math.max(1, parseInt((e.target as HTMLInputElement).value) || 1) })} /> volte</>}
           </div>
@@ -691,6 +788,77 @@ export function TrofeoPage() {
   );
 }
 
+// --------------------------------------------------------------------------------------------- turni dalla mail
+interface ShiftImport { at: string; subject: string | null; rest: number; days: number; added: number; removed: number; range_from: string | null; range_to: string | null }
+export function ShiftsPage() {
+  const [rem, setRemV] = useState<number | null>(() => {
+    try { const v = localStorage.getItem("shift-rem"); return v === null ? 1440 : v === "" ? null : Number(v); } catch { return 1440; }
+  });
+  const setRem = (v: number | null) => { setRemV(v); try { localStorage.setItem("shift-rem", v == null ? "" : String(v)); } catch { /* */ } };
+  const [script, setScript] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [log, setLog] = useState<ShiftImport[] | null>(null);
+  const loadLog = async () => {
+    const { data, error } = await supabase.from("shift_imports").select("at,subject,rest,days,added,removed,range_from,range_to").order("at", { ascending: false }).limit(3);
+    setLog(error ? [] : (data as ShiftImport[]));
+  };
+  useEffect(() => { void loadLog(); const iv = setInterval(() => void loadLog(), 20000); return () => clearInterval(iv); }, []);
+  const prepare = async () => {
+    setBusy(true); setErr("");
+    try {
+      const key = await createDeviceKey("Gmail (turni)", true);
+      const txt = gmailScript(key, rem == null ? -99999 : rem);
+      setScript(txt);
+      await copyText(txt);
+      showToast("Script copiato: ora incollalo in Google Apps Script");
+    } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
+  };
+  const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} alle ${hm(d)}`; };
+  const day = (s: string | null) => { if (!s) return ""; const d = parseYmd(s); return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`; };
+  return (
+    <Page title="Turni dalla mail" dialog>
+      <div class="card">
+        <div class="row"><Icon n="notes" /><div class="grow"><div class="lab">Giorni di riposo automatici</div>
+          <div class="val">Quando arriva la mail dei turni da {SHIFT_SENDER}, i riposi finiscono da soli nel calendario «Turni». Funziona anche con telefono e PC spenti.</div></div></div>
+        <button type="button" class="row click" onClick={() => push({ t: "rem", allDay: true, value: rem, none: true, onPick: (v) => { setRem(v); setScript(null); } })}>
+          <Icon n="bell" /><div class="grow"><div class="lab">Promemoria per i riposi</div><div class="val">{rem == null ? "Nessuno" : remLabel(rem, true)}</div></div><Icon n="right" />
+        </button>
+      </div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="lab">Ultime mail importate</div>
+          {log === null ? <div class="val">…</div> : !log.length ? <div class="val">Nessuna finora</div> : log.map((l) => (
+            <div class="val">{fmt(l.at)} · {l.rest === 1 ? "1 riposo" : `${l.rest} riposi`}{l.range_from ? ` (${day(l.range_from)} – ${day(l.range_to)})` : ""}{l.added || l.removed ? ` · ${l.added} aggiunti, ${l.removed} tolti` : ""}</div>
+          ))}</div></div>
+      </div>
+      <div class="card steps">
+        <div class="lab" style={{ padding: "12px 14px 4px" }}>Da fare una volta sola (meglio dal PC)</div>
+        <ol>
+          <li><b>Copia lo script</b> (contiene la chiave per scrivere in questo calendario){script ? " — fatto, è negli appunti" : ""}.
+            <div><button class="btn primary" disabled={busy} onClick={prepare}>{script ? "Copia di nuovo" : "Copia lo script"}</button></div></li>
+          <li><b>Apri Google Apps Script</b> con il tuo account Gmail: si crea un progetto nuovo.
+            <div><button class="btn" onClick={() => void openUrl("https://script.google.com/home/projects/create")}>Apri script.google.com</button></div></li>
+          <li><b>Incolla</b>: cancella il testo che c'è, incolla (Ctrl+V) e salva (icona del dischetto o Ctrl+S).</li>
+          <li><b>Attiva</b>: in alto, accanto a «▶ Esegui», scegli la funzione <b>installa</b> e premi <b>Esegui</b>.</li>
+          <li><b>Dai il permesso</b>: «Rivedi autorizzazioni» → il tuo account → «Avanzate» → «Vai a Progetto senza titolo (non sicuro)» → «Consenti». Lo script è tuo e lo vedi tutto: legge solo le mail dei turni.</li>
+          <li>Nel registro in basso compare «Fatto»: da ora le mail dei turni vengono controllate <b>ogni 10 minuti</b> e qui sopra vedi le importazioni.</li>
+        </ol>
+        {script && <textarea class="inp code" readOnly rows={5} value={script} onFocus={(e) => (e.target as HTMLTextAreaElement).select()} />}
+        <div class="note">Se cambi il promemoria, copia di nuovo lo script e sostituiscilo nel progetto. Le mail aggiornate con un riposo spostato correggono da sole il calendario.</div>
+      </div>
+      {err && <div class="note" style={{ color: "var(--danger)" }}>{err}</div>}
+    </Page>
+  );
+}
+
+async function copyText(t: string) {
+  try { await navigator.clipboard.writeText(t); return; } catch { /* sotto: metodo vecchio */ }
+  const ta = document.createElement("textarea");
+  ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); } finally { ta.remove(); }
+}
+
 // -------------------------------------------------------------------------------------------------- impostazioni
 /** Android: stato dell'invio delle modifiche ad app chiusa (per capire subito se qualcosa non va). */
 function PushStatusRow() {
@@ -748,6 +916,7 @@ export function SettingsPage() {
           <button class="iconbtn" aria-label="Sincronizza ora" onClick={() => scheduleSync(0)}><Icon n="sync" /></button>
         </div>
         <button class="row click" onClick={() => push({ t: "trofeo" })}><Icon n="monitor" /><div class="grow"><div class="lab">Trofeo LCD</div><div class="val">Eventi sul widget Calendario</div></div><Icon n="right" /></button>
+        <button class="row click" onClick={() => push({ t: "shifts" })}><Icon n="notes" /><div class="grow"><div class="lab">Turni dalla mail</div><div class="val">Giorni di riposo inseriti da soli dalla mail dei turni</div></div><Icon n="right" /></button>
         <button class="row click" onClick={() => push({ t: "calendars" })}><Icon n="folder" /><div class="grow"><div class="lab">Calendari</div><div class="val">{visibleCals.value.map((c) => c.name).join(", ")}</div></div><Icon n="right" /></button>
       </div>
       <div class="card">
@@ -760,17 +929,14 @@ export function SettingsPage() {
       </div>
       <div class="card">
         <div class="row"><Icon n="folder" /><div class="grow lab">Calendario predefinito</div>
-          <select class="inp" style={{ width: "auto", textAlign: "right" }} value={st.defaultCal || ""} onChange={(e) => setSettings({ defaultCal: (e.target as HTMLSelectElement).value || null })}>
-            <option value="">Il primo</option>{visibleCals.value.map((c) => <option value={c.id}>{c.name}</option>)}
-          </select></div>
+          <Choice cls="setval" title="Calendario predefinito" value={st.defaultCal || ""} onPick={(v) => setSettings({ defaultCal: v || null })}
+            options={[["", "Il primo"], ...visibleCals.value.map((c): [string, string] => [c.id, c.name])]} /></div>
         <div class="row"><Icon n="bell" /><div class="grow lab">Promemoria predefinito</div>
-          <select class="inp" style={{ width: "auto", textAlign: "right" }} value={st.defaultReminder == null ? "" : String(st.defaultReminder)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setSettings({ defaultReminder: v === "" ? null : parseInt(v) }); }}>
-            <option value="">Nessuno</option>{REMINDERS.map(([m, l]) => <option value={m}>{l}</option>)}
-          </select></div>
+          <button type="button" class="setval choice" onClick={() => push({ t: "rem", allDay: false, value: st.defaultReminder, none: true, onPick: (v) => setSettings({ defaultReminder: v }) })}>
+            {st.defaultReminder == null ? "Nessuno" : remLabel(st.defaultReminder, false)}<span class="chev">▾</span></button></div>
         <div class="row"><Icon n="clock" /><div class="grow lab">Durata predefinita</div>
-          <select class="inp" style={{ width: "auto", textAlign: "right" }} value={String(st.defaultDuration)} onChange={(e) => setSettings({ defaultDuration: parseInt((e.target as HTMLSelectElement).value) })}>
-            {[15, 30, 45, 60, 90, 120].map((m) => <option value={m}>{m < 60 ? `${m} minuti` : m === 60 ? "1 ora" : `${m / 60} ore`}</option>)}
-          </select></div>
+          <Choice cls="setval" title="Durata predefinita" value={String(st.defaultDuration)} onPick={(v) => setSettings({ defaultDuration: parseInt(v) })}
+            options={[15, 30, 45, 60, 90, 120, 180, 240].map((m): [string, string] => [String(m), m < 60 ? `${m} minuti` : m === 60 ? "1 ora" : m % 60 ? `${Math.floor(m / 60)} ${m < 120 ? "ora" : "ore"} e ${m % 60} min` : `${m / 60} ore`])} /></div>
         {isTauri && auto !== null && <div class="row"><Icon n="monitor" /><div class="grow"><div class="lab">Avvia con Windows</div><div class="val">Nell'area di notifica, per i promemoria</div></div><Switch on={auto} onChange={(v) => void autostart(v).then(setAuto)} /></div>}
       </div>
       {isTauri && <PcUpdateRow />}

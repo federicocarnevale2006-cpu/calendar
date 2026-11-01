@@ -16,6 +16,13 @@ function hash(s: string): number {
 
 export interface Reminder { id: number; at: Date; title: string; body: string }
 
+const DAYW = ["dom", "lun", "mar", "mer", "gio", "ven", "sab"], MONW = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"];
+/** «Oggi», «Domani» o «lun 3 nov»: il giorno dell'evento visto dal momento dell'avviso (come la parte nativa di Android). */
+function dayWord(occ: Date, at: Date): string {
+  const a = new Date(at.getFullYear(), at.getMonth(), at.getDate()), b = new Date(occ.getFullYear(), occ.getMonth(), occ.getDate());
+  const d = Math.round((b.getTime() - a.getTime()) / 86400000);
+  return d === 0 ? "Oggi" : d === 1 ? "Domani" : `${DAYW[b.getDay()]} ${b.getDate()} ${MONW[b.getMonth()]}`;
+}
 export function remindersFor(occs: Occ[], now: Date): Reminder[] {
   const out: Reminder[] = [];
   for (const o of occs) {
@@ -23,34 +30,27 @@ export function remindersFor(occs: Occ[], now: Date): Reminder[] {
       const start = o.allDay ? new Date(o.start.getFullYear(), o.start.getMonth(), o.start.getDate(), 9, 0) : o.start;
       const at = new Date(start.getTime() - m * 60000);
       if (at <= now) continue;
-      const when = o.allDay ? "Tutto il giorno" : m === 0 ? `Adesso · ${hm(o.start)}` : `${hm(o.start)} (fra ${m >= 60 ? (m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`) : `${m} min`})`;
+      const day = dayWord(o.start, at);
+      const ahead = m >= 1440 && m % 1440 === 0 ? (m === 1440 ? "1 giorno" : `${m / 1440} giorni`) : m >= 60 ? (m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`) : `${m} min`;
+      const when = o.allDay ? `${day} · Tutto il giorno` : m <= 0 ? `Adesso · ${hm(o.start)}` : day !== "Oggi" ? `${day} alle ${hm(o.start)}` : `${hm(o.start)} (fra ${ahead})`;
       out.push({ id: hash(`${o.key}_${m}`), at, title: o.ev.title || "(senza titolo)", body: [when, o.ev.location].filter(Boolean).join(" · ") });
     }
   }
   return out.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
-// ---- Android: notifiche programmate nel sistema (arrivano anche ad app chiusa) ------------------------------
-let lastSig = "";
-export async function scheduleAndroid(rem: Reminder[]) {
-  if (!isAndroid) return;
-  const list = rem.slice(0, 60);                                 // Android ne tiene un numero limitato: le prossime 60
-  const sig = list.map((r) => `${r.id}@${r.at.getTime()}|${r.title}|${r.body}`).join(";");
-  if (sig === lastSig) return;
+// ---- Android: i promemoria li programma la parte nativa (CalReminders.java), anche ad app chiusa e per gli eventi
+// arrivati dal PC o dalla mail dei turni. Qui solo il permesso per le notifiche e la pulizia di quelli programmati dalle
+// versioni precedenti (altrimenti arriverebbero doppi).
+let androidReady = false;
+export async function scheduleAndroid(_rem: Reminder[]) {
+  if (!isAndroid || androidReady) return;
   const { LocalNotifications } = await import("@capacitor/local-notifications");
   const perm = await LocalNotifications.checkPermissions();
-  if (perm.display !== "granted") {
-    const r = await LocalNotifications.requestPermissions();
-    if (r.display !== "granted") return;
-  }
+  if (perm.display !== "granted") await LocalNotifications.requestPermissions();
   const pend = await LocalNotifications.getPending();
   if (pend.notifications.length) await LocalNotifications.cancel({ notifications: pend.notifications.map((n) => ({ id: n.id })) });
-  if (list.length) {
-    await LocalNotifications.schedule({
-      notifications: list.map((r) => ({ id: r.id, title: r.title, body: r.body, schedule: { at: r.at, allowWhileIdle: true }, smallIcon: "ic_stat_cal" })),
-    });
-  }
-  lastSig = sig;
+  androidReady = true;
 }
 
 // ---- Windows: l'app resta nell'area di notifica e controlla lei i promemoria ------------------------------

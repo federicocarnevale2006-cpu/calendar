@@ -24,6 +24,7 @@ public final class CalData {
         public long startUtc, endUtc;          // istanti (ms); per «tutto il giorno» mezzanotte UTC del primo e dell'ultimo giorno
         public int color = 0xFF3B82F6;
         public Set<String> exdates = new HashSet<>();
+        public int[] reminders = new int[0];   // minuti prima dell'inizio (per «tutto il giorno»: prima delle 9:00)
     }
 
     public static final class Occ implements Comparable<Occ> {

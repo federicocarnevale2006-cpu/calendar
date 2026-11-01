@@ -8,7 +8,7 @@ import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width,
 import { Icon } from "./icons";
 import { Login } from "./Login";
 import { AgendaView, DayList, DaySheet, MonthView, openNew, QuickAdd, WeekView, YearView } from "./views";
-import { Calendars, CalToggles, Detail, Drawer, Editor, QuickSheet, Scope, Search, SettingsPage, SideMini, TrofeoPage } from "./overlays";
+import { Calendars, CalToggles, ChoiceSheet, Detail, Drawer, Editor, QuickSheet, RemSheet, Scope, Search, SettingsPage, ShiftsPage, SideMini, TrofeoPage } from "./overlays";
 
 function useTheme() {
   const t = settings.value.theme;
@@ -108,7 +108,7 @@ function useWidgets() {
         const c = calById.value.get(e.calendar_id || "");
         if (c && (c.deleted || !c.visible)) continue;
         if (!e.rrule && new Date(e.end_at).getTime() < cut) continue;
-        rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], location: e.location });
+        rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], location: e.location, reminders: e.reminders || [] });
       }
       const y = new Date().getFullYear();
       void pushWidgets({ events: JSON.stringify(rows), holidays: JSON.stringify(hol ? holidaysRange(y - 1, y + 2) : {}), weekStart: ws });
@@ -200,6 +200,9 @@ function Overlays() {
           case "calendars": return <Calendars add={o.add} />;
           case "drawer": return <Drawer />;
           case "trofeo": return <TrofeoPage />;
+          case "rem": return <RemSheet allDay={o.allDay} start={o.start} value={o.value} onPick={o.onPick} none={o.none} />;
+          case "choice": return <ChoiceSheet title={o.title} options={o.options} value={o.value} onPick={o.onPick} />;
+          case "shifts": return <ShiftsPage />;
         }
       })}
       {toast.value && (

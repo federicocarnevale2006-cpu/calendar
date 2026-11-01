@@ -350,3 +350,40 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .content { overflow: hidden; }
 .mgrid, .week, .year { will-change: transform; }
 .week, .year { touch-action: pan-y; }
+
+/* ---- promemoria scelto con le rotelle e scelte nello stile dell'app (al posto dei menu di sistema) ---- */
+.wheel.txt .wi { font-size: 17px; white-space: nowrap; }
+.wheel.txt .wi.on { font-size: 19px; }
+.twheel.rem { gap: 2px; padding: 0 12px; }
+.twheel.rem .band { left: 14px; right: 14px; width: auto; margin-left: 0; }
+.twheel.rem .alle { position: relative; font-size: 16px; color: var(--muted); padding: 0 6px; }
+.remsheet, .choicesheet { padding: 0 0 calc(12px + var(--safe-b)); }
+.remsheet .grip, .choicesheet .grip { width: 40px; height: 4px; border-radius: 2px; background: var(--faint); margin: 8px auto 6px; opacity: .6; }
+.remhead { display: flex; align-items: center; gap: 14px; padding: 8px 20px 6px; }
+.remhead .ic { color: var(--accent); }
+.remval { font-size: 19px; font-weight: 700; }
+.remwhen { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+.remwhen.past { color: var(--danger); }
+.rembtns { display: flex; align-items: center; gap: 8px; padding: 10px 18px 0; }
+.rembtns .grow { flex: 1; }
+.rempill { padding: 0 4px 0 0; overflow: hidden; }
+.rempill .remedit { height: 32px; padding: 0 8px 0 12px; font: inherit; color: inherit; }
+.rempill .x { width: 26px; height: 26px; border-radius: 13px; display: grid; place-items: center; color: inherit; opacity: .7; }
+.rempill .x:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.pill.addrem { color: var(--accent); gap: 4px; }
+.chtitle { font-size: 17px; font-weight: 700; padding: 6px 20px 8px; }
+.chlist { display: flex; flex-direction: column; padding: 0 10px; max-height: 60vh; overflow-y: auto; }
+.chopt { display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 0 12px; border-radius: 14px; text-align: left; font-size: 15.5px; }
+.chopt .grow { flex: 1; }
+.chopt.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.chopt:active { background: var(--surface2); }
+.choice { display: inline-flex; align-items: center; gap: 6px; }
+.choice .chev { font-size: 11px; opacity: .6; }
+.setval { font-size: 14.5px; color: var(--accent); font-weight: 600; padding: 6px 2px; text-align: right; }
+.qcals.ed { padding: 2px 18px 12px 56px; }
+.steps ol { margin: 4px 0 8px; padding: 0 18px 0 40px; display: grid; gap: 12px; font-size: 14.5px; line-height: 1.45; }
+.steps ol .btn { margin-top: 8px; height: 40px; }
+textarea.inp.code { display: block; width: calc(100% - 36px); resize: none; font-size: 11.5px; line-height: 1.4; user-select: text; }
+/* pannelli aperti sopra una pagina (editor, impostazioni): sopra la pagina */
+.scrim.top { z-index: 50; }
+.remsheet, .choicesheet { z-index: 51; }

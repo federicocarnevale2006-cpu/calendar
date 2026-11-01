@@ -80,6 +80,11 @@ public final class CalWidgets {
                     try { if (!col.isEmpty()) e.color = Color.parseColor(col); } catch (IllegalArgumentException ignored) { }
                     JSONArray ex = o.optJSONArray("exdates");
                     if (ex != null) for (int j = 0; j < ex.length(); j++) e.exdates.add(ex.optString(j));
+                    JSONArray rm = o.optJSONArray("reminders");
+                    if (rm != null) {
+                        e.reminders = new int[rm.length()];
+                        for (int j = 0; j < rm.length(); j++) e.reminders[j] = rm.optInt(j);
+                    }
                     out.add(e);
                 } catch (Exception ignored) { }
             }
@@ -149,6 +154,8 @@ public final class CalWidgets {
                 if (fetch) maybeFetch(app);
                 updateAll(app);
                 scheduleMidnight(app);
+                CalReminders.reschedule(app);                            // promemoria anche ad app chiusa
+                CalReminders.ensureFetchJob(app);
             } catch (Exception ignored) {
             } finally {
                 if (pr != null) pr.finish();

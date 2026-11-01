@@ -227,6 +227,7 @@ public final class CalPush {
             CalWidgets.prefs(ctx).edit().putLong("fetched", 0).apply();     // widget della Home aggiornati dal server
             CalWidgets.maybeFetch(ctx);
             CalWidgets.updateAll(ctx);
+            CalReminders.reschedule(ctx);
         }
         synchronized (LOCK) { return obj(p, "pending").length() > 0 ? RESULT_RETRY : RESULT_DONE; }
     }
