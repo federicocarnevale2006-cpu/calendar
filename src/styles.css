@@ -314,7 +314,8 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .chip, .mspan { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .mcell.droptarget { background: color-mix(in srgb, var(--accent) 15%, transparent) !important; }
 .chip .ct, .mspan .ct { display: block; overflow: hidden; white-space: nowrap; }
-.chip.msel, .mspan.msel { padding: 0 12px; position: relative; z-index: 3; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--c, var(--accent)); }
+.chip.msel, .mspan.msel { padding: 0 12px; z-index: 3; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--c, var(--accent)); }
+.chip.msel { position: relative; }                 /* la barra di piu' giorni resta «absolute»: prima finiva fuori posto */
 .mhdl { position: absolute; top: 50%; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; background: #fff; border: 3px solid var(--c, var(--accent)); box-shadow: 0 1px 4px rgba(0,0,0,.35); touch-action: none; z-index: 4; cursor: ew-resize; }
 .mhdl::after { content: ""; position: absolute; inset: -14px; }
 @media (pointer: fine) { .mhdl::after { inset: -4px; } }

@@ -24,6 +24,7 @@ export function seedDemo() {
     { ...base, id: "e8", calendar_id: "c1", title: "Cena con amici", start_at: at(0, 20), end_at: at(0, 22, 30) },
     { ...base, id: "e9", calendar_id: "c2", title: "Revisione codice", start_at: at(0, 10, 30), end_at: at(0, 12) },
     { ...base, id: "e10", calendar_id: "c1", title: "Spesa", start_at: at(-2, 17), end_at: at(-2, 18) },
+    { ...base, id: "e11", calendar_id: "c1", title: "giorno libero", color: "#ef4444", start_at: at(1, 0), end_at: at(1, 23, 59) },
   ];
   cals.value = c;
   evMap.value = new Map(e.map((x) => [x.id, x]));
