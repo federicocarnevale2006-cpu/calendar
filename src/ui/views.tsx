@@ -20,17 +20,75 @@ export function openNew(day: Date, hour?: number) {
   push(width.value < 840 ? { t: "quick", ev } : { t: "editor", ev, isNew: true });     // telefono: pannello rapido come Samsung
 }
 
-/** Scorrimento orizzontale col dito: mese/settimana precedente o successivo. */
-export function useSwipe(onSwipe: (dir: number) => void) {
-  const st = useRef<{ x: number; y: number; t: number } | null>(null);
+/**
+ * Scorrimento orizzontale col dito come nel calendario Samsung: il contenuto segue il dito, se lo si lascia oltre un
+ * certo punto (o con un colpo veloce) scivola via e il periodo nuovo entra dal lato opposto; altrimenti torna al suo posto.
+ * Anche coi tasti (frecce, «Oggi») il periodo nuovo entra scorrendo. `period` = inizio del periodo mostrato (per la direzione).
+ */
+export function useSlide(onSwipe: (dir: number) => void, period: number, canSwipe: () => boolean = () => true) {
+  const ref = useRef<HTMLDivElement>(null);
+  const st = useRef<{ x: number; y: number; t: number; track: boolean; dead: boolean; dx: number } | null>(null);
+  const prev = useRef(period);
+  const busy = useRef(false);
+  const set = (tr: string, op: string, anim: string) => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.transition = anim;
+    el.style.transform = tr;
+    el.style.opacity = op;
+  };
+  useLayoutEffect(() => {                                       // periodo cambiato: entra dal lato giusto
+    const dir = Math.sign(period - prev.current);
+    prev.current = period;
+    const el = ref.current;
+    if (!dir || !el) return;
+    const w = el.clientWidth || 360;
+    set(`translateX(${dir * w * 0.32}px)`, "0.35", "none");
+    void el.offsetWidth;                                         // applica subito la posizione di partenza
+    requestAnimationFrame(() => set("translateX(0px)", "1", "transform .24s cubic-bezier(.2,.8,.2,1), opacity .2s ease-out"));
+    const t = setTimeout(() => { if (!st.current?.track) set("", "", ""); }, 280);
+    return () => clearTimeout(t);
+  }, [period]);
   return {
-    onTouchStart: (e: TouchEvent) => { const t = e.touches[0]; st.current = { x: t.clientX, y: t.clientY, t: Date.now() }; },
-    onTouchEnd: (e: TouchEvent) => {
-      const s = st.current; st.current = null;
-      if (!s) return;
-      const t = e.changedTouches[0], dx = t.clientX - s.x, dy = t.clientY - s.y;
-      if (dragging()) return;
-      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.6 && Date.now() - s.t < 700) { void haptic(); onSwipe(dx < 0 ? 1 : -1); }
+    ref,
+    onTouchStart: (e: TouchEvent) => {
+      if (busy.current || e.touches.length > 1) { st.current = null; return; }
+      const t = e.touches[0];
+      st.current = { x: t.clientX, y: t.clientY, t: Date.now(), track: false, dead: false, dx: 0 };
+    },
+    onTouchMove: (e: TouchEvent) => {
+      const s = st.current;
+      if (!s || s.dead) return;
+      if (dragging() || !canSwipe()) { if (s.track) set("translateX(0px)", "1", "transform .18s ease-out, opacity .18s"); s.dead = true; return; }
+      const t = e.touches[0], dx = t.clientX - s.x, dy = t.clientY - s.y;
+      if (!s.track) {
+        if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) s.track = true;
+        else { if (Math.abs(dy) > 12) s.dead = true; return; }
+      }
+      s.dx = dx;
+      const w = ref.current?.clientWidth || 360;
+      set(`translateX(${dx}px)`, String(1 - Math.min(0.35, (Math.abs(dx) / w) * 0.45)), "none");
+    },
+    onTouchEnd: () => {
+      const s = st.current;
+      st.current = null;
+      if (!s || !s.track || s.dead) return;
+      const el = ref.current;
+      const w = el?.clientWidth || 360;
+      const v = Math.abs(s.dx) / Math.max(1, Date.now() - s.t);
+      if (Math.abs(s.dx) > w * 0.3 || (v > 0.45 && Math.abs(s.dx) > 40)) {
+        const dir = s.dx < 0 ? 1 : -1;
+        busy.current = true;
+        set(`translateX(${-dir * w}px)`, "0.2", "transform .16s ease-in, opacity .16s ease-in");
+        void haptic();
+        setTimeout(() => { busy.current = false; onSwipe(dir); }, 150);
+      } else {
+        set("translateX(0px)", "1", "transform .2s cubic-bezier(.2,.8,.2,1), opacity .2s");
+      }
+    },
+    onTouchCancel: () => {
+      if (st.current?.track) set("translateX(0px)", "1", "transform .2s ease-out, opacity .2s");
+      st.current = null;
     },
   };
 }
@@ -107,7 +165,8 @@ export function MonthView({ desk }: { desk: boolean }) {
   const lineH = desk ? 20 : 18, top = desk ? 34 : 32;
   const maxL = Math.max(0, Math.floor((rowH - top - 2) / lineH));
   const dotsMode = maxL < 2;
-  const swipe = useSwipe((d) => { cursor.value = addMonths(new Date(c.getFullYear(), c.getMonth(), 1), d); selDay.value = null; });
+  const { ref: slideRef, ...swipe } = useSlide((d) => { cursor.value = addMonths(new Date(c.getFullYear(), c.getMonth(), 1), d); selDay.value = null; },
+    new Date(c.getFullYear(), c.getMonth(), 1).getTime(), () => !md.current?.active && !msel);
   const wn = st.weekNumbers;
   const order = [0, 1, 2, 3, 4, 5, 6].map((i) => (i + st.weekStart) % 7);
   const tapDay = (d: Date, dbl = false) => {
@@ -249,7 +308,7 @@ export function MonthView({ desk }: { desk: boolean }) {
         {wn && <div />}
         {order.map((d) => <div class={d === 0 ? "sun" : d === 6 ? "sat" : ""}>{desk ? cap(DAYS_SHORT[d]) : DAYS_LETTER[d]}</div>)}
       </div>
-      <div class="mgrid" ref={grid}>
+      <div class="mgrid" ref={(el) => { (grid as any).current = el; (slideRef as any).current = el; }}>
         {weeks.map((w) => {
           const { spans, cells } = layoutWeek(w, occs);
           const limits = cells.map((sl) => (sl.filter(Boolean).length > maxL ? maxL - 1 : maxL));
@@ -452,7 +511,7 @@ export function WeekView({ days }: { days: 1 | 7 }) {
     el.addEventListener("touchmove", stop, { passive: false });
     return () => el.removeEventListener("touchmove", stop);
   }, []);
-  const swipe = useSwipe((d) => { if (!dr.current?.active && !sel) cursor.value = addDays(c, d * days); });
+  const { ref: slideRef, ...swipe } = useSlide((d) => { cursor.value = addDays(c, d * days); }, start.getTime(), () => !dr.current?.active && !sel);
   const allDay = occs.filter((o) => o.allDay || (o.end.getTime() - o.start.getTime() >= 86400000 - 1) || !sameDay(o.start, new Date(o.end.getTime() - 1)));
   const lanes: { o: Occ; c0: number; c1: number; lane: number }[] = [];
   for (const o of allDay) {
@@ -593,7 +652,7 @@ export function WeekView({ days }: { days: 1 | 7 }) {
   const dayIdx = preview ? dayDiff(start, preview.s) : -1;
 
   return (
-    <div class="week" {...swipe}>
+    <div class="week" {...swipe} ref={slideRef}>
       <div class="whead" style={{ gridTemplateColumns: cols }}>
         <div class="wd" style={{ fontSize: "10px" }}>{days === 7 && st.weekNumbers ? `S${isoWeek(addDays(start, 3))}` : ""}</div>
         {list.map((d) => (
@@ -744,9 +803,9 @@ export function MiniMonth({ y, m, onPick, sel, compact }: { y: number; m: number
 
 export function YearView() {
   const y = cursor.value.getFullYear(), today = now.value;
-  const swipe = useSwipe((d) => (cursor.value = new Date(y + d, cursor.value.getMonth(), 1)));
+  const { ref: slideRef, ...swipe } = useSlide((d) => (cursor.value = new Date(y + d, cursor.value.getMonth(), 1)), y);
   return (
-    <div class="year" {...swipe}>
+    <div class="year" {...swipe} ref={slideRef}>
       {MONTHS.map((name, m) => (
         <button class={"ymon" + (today.getFullYear() === y && today.getMonth() === m ? " cur" : "")} onClick={() => { cursor.value = new Date(y, m, 1); setSettings({ view: "month" }); }}>
           <h5>{cap(name)}</h5>

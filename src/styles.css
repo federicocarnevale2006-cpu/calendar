@@ -342,3 +342,8 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .dbar button .ic { width: 22px; height: 22px; }
 .dbar button.del { color: var(--danger); }
 .dbar button:active { background: var(--surface2); }
+
+/* ---------- scorrimento fra mesi/settimane col dito ---------- */
+.content { overflow: hidden; }
+.mgrid, .week, .year { will-change: transform; }
+.week, .year { touch-action: pan-y; }
