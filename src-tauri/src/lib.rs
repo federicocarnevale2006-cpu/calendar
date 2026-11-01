@@ -23,6 +23,20 @@ fn write_trofeo_link(json: String) -> Result<String, String> {
     Ok(p.to_string_lossy().to_string())
 }
 
+/// Eventi per il widget di Trofeo LCD, scritti a ogni modifica (anche quelle arrivate dal telefono): Trofeo li legge
+/// subito, senza aspettare la sua lettura da internet (che resta come riserva se l'app per PC e' chiusa).
+#[tauri::command]
+fn write_trofeo_events(json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&json).map_err(|e| format!("dati non validi: {e}"))?;
+    let dir = trofeo_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let p = dir.join("calendario_eventi.json");
+    let tmp = dir.join("calendario_eventi.json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn read_trofeo_link() -> Option<String> {
     let p = trofeo_dir().ok()?.join("calendario.json");
@@ -87,7 +101,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--nascosto"]),
         ))
-        .invoke_handler(tauri::generate_handler![write_trofeo_link, read_trofeo_link])
+        .invoke_handler(tauri::generate_handler![write_trofeo_link, read_trofeo_link, write_trofeo_events])
         .setup(|app| {
             let open = MenuItem::with_id(app, "apri", "Apri Calendario", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "esci", "Esci", true, None::<&str>)?;

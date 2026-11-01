@@ -3,7 +3,7 @@ import { addDays, addMonths, cap, fmtLongDay, MONTHS, MONTHS_SHORT, startOfDay, 
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
 import { calById, cals, createDeviceKey, evColor, evMap, occurrences, ready, session, settings, setSettings } from "../store";
 import { holidaysRange } from "../holidays";
-import { checkUpdate, isAndroid, isTauri, onBack, onDeepLink, pushWidgets, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, tickTauri, update, writeTrofeoLink } from "../platform";
+import { checkUpdate, isAndroid, isTauri, onBack, onDeepLink, pushWidgets, writeTrofeoEvents, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, tickTauri, update, writeTrofeoLink } from "../platform";
 import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width, now } from "./state";
 import { Icon } from "./icons";
 import { Login } from "./Login";
@@ -97,6 +97,32 @@ function useWidgets() {
     }, 1200);
     return () => clearTimeout(t);
   }, [s?.user.id, m, cs, ws, hol]);
+}
+
+/** PC: a ogni modifica (anche quelle fatte sul telefono, che arrivano qui in tempo reale) gli eventi vanno subito a
+ * Trofeo LCD in un file accanto al collegamento; prima Trofeo li rileggeva da internet una volta al minuto. */
+function useTrofeoEvents() {
+  const s = session.value, m = evMap.value, cs = cals.value;
+  useEffect(() => {
+    if (!isTauri || !s) return;
+    const write = () => {
+      const cut = Date.now() - 45 * 86400000;
+      const rows = [];
+      for (const e of evMap.value.values()) {
+        if (e.deleted) continue;
+        const c = calById.value.get(e.calendar_id || "");
+        if (c && (c.deleted || !c.visible)) continue;
+        if (!e.rrule && new Date(e.end_at).getTime() < cut) continue;
+        rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, tz: e.tz, location: e.location,
+          color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], reminders: e.reminders || [], updated_at: e.updated_at || null });
+      }
+      void writeTrofeoEvents(JSON.stringify({ user: s.user.id, email: s.user.email ?? "", written: new Date().toISOString(), events: rows }))
+        .catch((err) => console.warn("eventi per Trofeo", err));
+    };
+    const t = setTimeout(write, 300);
+    const iv = setInterval(write, 60000);         // anche senza modifiche, ogni minuto: Trofeo sa che l'app per PC e' aperta
+    return () => { clearTimeout(t); clearInterval(iv); };
+  }, [s?.user.id, m, cs]);
 }
 
 function step(dir: number) {
@@ -252,6 +278,7 @@ export function App() {
   useReminders();
   useTrofeoAutoLink();
   useWidgets();
+  useTrofeoEvents();
   useEffect(() => {
     void onDeepLink((url) => { if (url.startsWith("calendario://nuovo")) { closeAll(); openNew(new Date()); } });
   }, []);
