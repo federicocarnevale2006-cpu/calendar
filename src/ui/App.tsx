@@ -1,7 +1,7 @@
 import { useEffect } from "preact/hooks";
 import { addDays, addMonths, cap, fmtLongDay, MONTHS, MONTHS_SHORT, startOfDay, startOfWeek } from "../date";
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
-import { calById, cals, createDeviceKey, evColor, evMap, occurrences, pendingCount, ready, scheduleSync, sentSignal, session, settings, setSettings, syncState } from "../store";
+import { calById, cals, createDeviceKey, enableDeviceWrite, evColor, evMap, occurrences, pendingCount, pushKeyBad, ready, scheduleSync, sentSignal, session, settings, setSettings, syncState } from "../store";
 import { holidaysRange } from "../holidays";
 import { checkUpdate, isAndroid, isTauri, onBack, onDeepLink, onResume, pushWidgets, writeTrofeoEvents, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, tickTauri, update, writeTrofeoLink } from "../platform";
 import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width, now } from "./state";
@@ -65,21 +65,39 @@ function useTrofeoAutoLink() {
   }, [s?.user.id]);
 }
 
+let widgetKeySent = "";
 /** Android: i widget della schermata Home ricevono gli eventi a ogni modifica e una chiave per aggiornarsi ad app chiusa. */
 function useWidgets() {
   const s = session.value, m = evMap.value, cs = cals.value, ws = settings.value.weekStart, hol = settings.value.holidays;
+  // la stessa chiave serve anche a inviare le modifiche ad app chiusa: va abilitata alla scrittura (una volta). Se Android
+  // la trova rifiutata (tolta dalle Impostazioni) se ne crea una nuova.
+  const online = syncState.value === "ok", bad = pushKeyBad.value;
   useEffect(() => {
     if (!isAndroid || !s) return;
     void (async () => {
-      const k = "widget-key-" + s.user.id;
-      let key = "";
-      try { key = localStorage.getItem(k) || ""; } catch { /* */ }
-      if (!key) {
-        try { key = await createDeviceKey("Widget Android"); localStorage.setItem(k, key); } catch { return; }   // senza rete: al prossimo avvio
+      const k = "widget-key-" + s.user.id, kw = "widget-write-" + s.user.id;
+      const get = (n: string) => { try { return localStorage.getItem(n) || ""; } catch { return ""; } };
+      const set = (n: string, v: string) => { try { if (v) localStorage.setItem(n, v); else localStorage.removeItem(n); } catch { /* */ } };
+      let key = get(k), writable = get(kw) === key && !!key;
+      if (bad && bad > Number(get("widget-bad-" + s.user.id) || 0)) {   // rifiutata anche se abilitata: chiave tolta
+        set("widget-bad-" + s.user.id, String(bad));
+        if (writable) { key = ""; writable = false; }
       }
+      try {
+        if (key && !writable) {
+          if (await enableDeviceWrite(key)) { set(kw, key); writable = true; } else key = "";
+        }
+        if (!key) {
+          key = await createDeviceKey("Telefono Android", true);
+          set(k, key);
+          set(kw, key);
+        }
+      } catch { if (!key) return; }                                     // senza rete: si riprova quando torna
+      if (key === widgetKeySent) return;
+      widgetKeySent = key;
       await pushWidgets({ key, url: SUPABASE_URL, anon: SUPABASE_KEY });
     })();
-  }, [s?.user.id]);
+  }, [s?.user.id, online, bad]);
   useEffect(() => {
     if (!isAndroid || !s) return;
     const t = setTimeout(() => {

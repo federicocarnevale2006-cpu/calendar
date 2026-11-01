@@ -3,10 +3,14 @@ package app.trofeo.calendario;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /** Dall'app ai widget: eventi, festivita', chiave di lettura e primo giorno della settimana. */
 @CapacitorPlugin(name = "CalWidgets")
@@ -30,5 +34,28 @@ public class WidgetsPlugin extends Plugin {
         e.apply();
         CalWidgets.refreshAsync(ctx, null, false);
         call.resolve();
+    }
+
+    /** Copia delle modifiche in attesa: le invia Android anche ad app chiusa (vedi CalPush). */
+    @PluginMethod
+    public void setPending(PluginCall call) {
+        final Context ctx = getContext().getApplicationContext();
+        JSONArray ops = call.getArray("ops");
+        if (ops == null) ops = new JSONArray();
+        CalPush.setPending(ctx, ops, call.getString("url", ""), call.getString("anon", ""));
+        call.resolve();
+    }
+
+    /** Cosa e' gia' partito da Android ad app chiusa (l'app lo toglie dalla sua coda). */
+    @PluginMethod
+    public void takeSent(PluginCall call) {
+        final Context ctx = getContext().getApplicationContext();
+        JSONObject r = CalPush.takeSent(ctx);
+        JSObject out = new JSObject();
+        try {
+            out.put("sent", r.optJSONObject("sent") != null ? JSObject.fromJSONObject(r.getJSONObject("sent")) : new JSObject());
+            out.put("keyBad", r.optBoolean("keyBad", false));
+        } catch (Exception ignored) { }
+        call.resolve(out);
     }
 }

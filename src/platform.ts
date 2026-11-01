@@ -1,7 +1,7 @@
 // Differenze fra telefono (Capacitor, Android) e PC (Tauri, Windows). Nel browser semplice tutto questo non fa niente.
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { signal } from "@preact/signals";
-import { APK_URL, APP_BUILD, EXE_URL, VERSION_URL } from "./config";
+import { APK_URL, APP_BUILD, EXE_URL, SUPABASE_KEY, SUPABASE_URL, VERSION_URL } from "./config";
 import { addDays, hm } from "./date";
 import type { Occ } from "./model";
 
@@ -137,10 +137,29 @@ export async function haptic() {
 }
 
 // ---- widget della schermata Home (Android): l'app passa eventi, festivita' e la chiave per aggiornarsi da soli -----
-const CalWidgets = registerPlugin<{ setData(o: Record<string, unknown>): Promise<void> }>("CalWidgets");
+const CalWidgets = registerPlugin<{
+  setData(o: Record<string, unknown>): Promise<void>;
+  setPending(o: { ops: unknown[]; url: string; anon: string }): Promise<void>;
+  takeSent(): Promise<{ sent?: Record<string, number>; keyBad?: boolean }>;
+}>("CalWidgets");
 export async function pushWidgets(data: Record<string, unknown>) {
   if (!isAndroid) return;
   try { await CalWidgets.setData(data); } catch (e) { console.warn("widget", e); }
+}
+
+// ---- Android: le modifiche in attesa partono anche ad app chiusa ----------------------------------------------
+// L'app passa a Android una copia della sua coda; Android la invia da solo quando torna la rete (anche dopo aver chiuso
+// l'app dalle finestre recenti). Alla riapertura l'app legge cosa e' gia' partito e lo toglie dalla sua coda.
+export async function nativePending(ops: unknown[]) {
+  if (!isAndroid) return;
+  try { await CalWidgets.setPending({ ops, url: SUPABASE_URL, anon: SUPABASE_KEY }); } catch (e) { console.warn("coda Android", e); }
+}
+export async function nativeTakeSent(): Promise<{ sent: Record<string, number>; keyBad: boolean } | null> {
+  if (!isAndroid) return null;
+  try {
+    const r = await CalWidgets.takeSent();
+    return { sent: r?.sent || {}, keyBad: !!r?.keyBad };
+  } catch { return null; }
 }
 
 /** Dal widget («+» = nuovo evento): calendario://nuovo */

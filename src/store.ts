@@ -5,6 +5,7 @@ import { SUPABASE_KEY, SUPABASE_URL } from "./config";
 import { expand, uuid, type Cal, type Ev, type Occ } from "./model";
 import { addDays, localDateToUtcIso, startOfDay } from "./date";
 import { holidayName } from "./holidays";
+import { isAndroid, nativePending, nativeTakeSent } from "./platform";
 
 export const HOLIDAY_COLOR = "#e5484d";
 /** Evento finto (non salvato, non modificabile) per una festivita'. */
@@ -37,6 +38,7 @@ export const syncError = signal("");
 export const lastSync = signal<number>(0);
 export const pendingCount = signal(0);
 export const sentSignal = signal(0);                    // ultima volta che le modifiche in attesa sono partite
+export const pushKeyBad = signal(0);                    // Android ha trovato la chiave del telefono rifiutata: va rifatta
 
 export interface Settings {
   weekStart: number;            // 1 = lunedi', 0 = domenica
@@ -139,6 +141,7 @@ async function clearLocal() {
   evMap.value = new Map();
   cals.value = [];
   pendingCount.value = 0;
+  void mirror();
 }
 
 // ---- modifiche ----------------------------------------------------------------------------------------------
@@ -149,6 +152,7 @@ async function queue(table: "events" | "cals", row: Ev | Cal) {
   await d.put(table, row);
   await d.put("outbox", { table, id: row.id, seq }, `${table}:${row.id}`);
   pendingCount.value = (await d.getAllKeys("outbox")).length;
+  void mirror();                                          // copia ad Android: parte anche se l'app viene chiusa
   scheduleSync(300);
 }
 
@@ -191,6 +195,13 @@ function isNetErr(e: any): boolean {
   const m = String(e?.message || e || "").toLowerCase();
   return !e?.code || m.includes("fetch") || m.includes("network") || m.includes("failed") || m.includes("timeout") || m.includes("load");
 }
+/** Errore d'accesso (token scaduto o non rinnovato per la rete debole): la modifica e' giusta, si riprova dopo. */
+function isAuthErr(e: any, status?: number): boolean {
+  const m = String(e?.message || "").toLowerCase();
+  return status === 401 || status === 403 || ["42501", "PGRST301", "PGRST302", "PGRST303"].includes(String(e?.code || ""))
+    || m.includes("jwt") || m.includes("row-level security") || m.includes("permission denied");
+}
+const MAX_FAILS = 5;                                     // una riga rifiutata dal server per i suoi dati: dopo 5 tentativi si scarta
 let retryMs = 3000;                                      // nuovo tentativo dopo un errore: 3 s, poi sempre piu' tardi (max 60 s)
 let channel: RealtimeChannel | null = null;
 
@@ -203,6 +214,10 @@ async function push(uid: string) {
   const d = await getDb();
   const keys = (await d.getAllKeys("outbox")) as string[];
   if (!keys.length) return;
+  // prima di inviare serve un accesso valido: se il rinnovo non riesce (rete assente o debole) si riprova dopo, senza toccare
+  // la coda. Prima la richiesta partiva senza accesso, il server la rifiutava e la modifica veniva scartata.
+  const { data: sd } = await supabase.auth.getSession();
+  if (!sd.session) throw new Error("accesso da rinnovare (rete assente o debole)");
   const items = await Promise.all(keys.map(async (k) => ({ k, v: await d.get("outbox", k) })));
   for (const table of ["cals", "events"] as const) {           // prima i calendari: gli eventi li citano
     const mine = items.filter((i) => i.v?.table === table);
@@ -216,26 +231,72 @@ async function push(uid: string) {
         for (const c of COLS[table]) o[c] = c === "user_id" ? uid : r[c];
         rows.push(o);
       }
+      const failed = new Map<string, string>();
       if (rows.length) {
-        const { error } = await supabase.from(TABLE[table]).upsert(rows, { onConflict: "id" });
-        if (error) {
-          if (isNetErr(error)) throw new Error(error.message);
-          // il server ha rifiutato il gruppo: si riprova riga per riga, cosi' una sola riga sbagliata non blocca le altre
+        const res = await supabase.from(TABLE[table]).upsert(rows, { onConflict: "id" });
+        if (res.error) {
+          if (isNetErr(res.error) || isAuthErr(res.error, res.status)) throw new Error(res.error.message);
+          // il server ha rifiutato il gruppo per i dati: si riprova riga per riga, cosi' una sola riga sbagliata non blocca le altre
           for (const r of rows) {
             const one = await supabase.from(TABLE[table]).upsert([r], { onConflict: "id" });
             if (one.error) {
-              if (isNetErr(one.error)) throw new Error(one.error.message);
-              console.warn("riga rifiutata dal server, tolta dalla coda", table, r.id, one.error.message);
-              rejected.value = [...rejected.value.slice(-9), `${one.error.message}`];
+              if (isNetErr(one.error) || isAuthErr(one.error, one.status)) throw new Error(one.error.message);
+              failed.set(String(r.id), one.error.message);
             }
           }
         }
       }
       for (const it of chunk) {                                 // tolto dalla coda solo se nel frattempo non e' cambiato di nuovo
         const cur = await d.get("outbox", it.k);
-        if (cur && cur.seq === it.v.seq) await d.delete("outbox", it.k);
+        if (!cur || cur.seq !== it.v.seq) continue;
+        const err = failed.get(String(it.v.id));
+        if (err) {
+          const fails = (cur.fails || 0) + 1;
+          if (fails < MAX_FAILS) { await d.put("outbox", { ...cur, fails }, it.k); continue; }   // si riprova al prossimo giro
+          console.warn("riga rifiutata dal server, tolta dalla coda", table, it.v.id, err);
+          rejected.value = [...rejected.value.slice(-9), err];
+        }
+        await d.delete("outbox", it.k);
       }
     }
+  }
+  pendingCount.value = (await d.getAllKeys("outbox")).length;
+  void mirror();
+}
+
+/** Copia della coda ad Android (in ordine: una chiamata alla volta). */
+let mirrorChain: Promise<void> = Promise.resolve();
+function mirror(): Promise<void> {
+  if (!isAndroid) return Promise.resolve();
+  mirrorChain = mirrorChain.then(async () => {
+    const d = await getDb();
+    const keys = (await d.getAllKeys("outbox")) as string[];
+    const ops = [];
+    for (const k of keys) {
+      const v = await d.get("outbox", k);
+      if (!v || (v.table !== "events" && v.table !== "cals")) continue;
+      const r = await d.get(v.table, v.id);
+      if (!r) continue;
+      const row: Record<string, unknown> = {};
+      for (const c of COLS[v.table as "events" | "cals"]) if (c !== "user_id") row[c] = r[c] ?? null;
+      ops.push({ k, t: v.table, seq: v.seq, row });
+    }
+    await nativePending(ops);
+  }).catch((e) => console.warn("coda Android", e));
+  return mirrorChain;
+}
+
+/** Quello che Android ha gia' inviato ad app chiusa esce dalla coda (se nel frattempo non e' stato modificato di nuovo). */
+async function takeNativeSent() {
+  const r = await nativeTakeSent();
+  if (!r) return;
+  if (r.keyBad) pushKeyBad.value = Date.now();
+  const ks = Object.keys(r.sent);
+  if (!ks.length) return;
+  const d = await getDb();
+  for (const k of ks) {
+    const cur = await d.get("outbox", k);
+    if (cur && Number(cur.seq) === Number(r.sent[k])) await d.delete("outbox", k);
   }
   pendingCount.value = (await d.getAllKeys("outbox")).length;
 }
@@ -292,6 +353,7 @@ export async function sync() {
   syncState.value = "sync";
   const hadPending = pendingCount.value;
   try {
+    await takeNativeSent();
     await push(s.user.id);
     await pull();
     syncState.value = "ok";
@@ -341,6 +403,16 @@ async function onSession(s: Session | null) {
   scheduleSync(0);
 }
 
+/** Accesso salvato sul dispositivo: l'app si apre subito anche senza rete (il token si rinnova dopo, appena possibile). */
+function storedSession(): Session | null {
+  try {
+    const j = JSON.parse(localStorage.getItem("calendario-auth") || "null");
+    return j && j.user && j.user.id && j.refresh_token ? (j as Session) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function init() {
   try {
     await loadLocal();
@@ -353,14 +425,24 @@ export async function init() {
     ready.value = true;
     return;
   }
-  const { data } = await supabase.auth.getSession();
-  await onSession(data.session);
-  supabase.auth.onAuthStateChange((_ev, s) => { void onSession(s); });
+  // prima, con il token scaduto e senza rete, l'app restava ferma (e poi sulla schermata d'accesso) finche' non tornava la
+  // rete: ora si apre subito con l'accesso salvato e le modifiche finiscono in coda
+  const cached = storedSession();
+  if (cached) await onSession(cached);
+  supabase.auth.onAuthStateChange((ev, s) => {
+    if (s) void onSession(s);
+    else if (ev === "SIGNED_OUT") void onSession(null);         // uscita vera (o accesso revocato), non la rete assente
+  });
   ready.value = true;
+  void supabase.auth.getSession().then(({ data }) => {
+    if (data.session) void onSession(data.session);
+    else if (!cached) void onSession(null);
+  });
+  void mirror();                                                 // Android riceve la coda attuale (anche dopo un aggiornamento)
   window.addEventListener("online", () => scheduleSync(0));
   window.addEventListener("offline", () => { syncState.value = "offline"; });
   // tornando all'app si sincronizza; uscendo, se ci sono modifiche in attesa si prova a inviarle subito (prima che il
-  // telefono chiuda l'app)
+  // telefono chiuda l'app; se non ci riesce, le invia Android da solo quando torna la rete)
   document.addEventListener("visibilitychange", () => { if (!document.hidden || pendingCount.value) scheduleSync(0); });
   // ogni minuto si controlla comunque il server: se il collegamento in tempo reale si e' perso (PC in sospensione, rete
   // cambiata) le modifiche fatte sul telefono arrivano lo stesso. Sul PC anche a finestra chiusa (aggiorna Trofeo LCD).
@@ -373,8 +455,15 @@ export async function signOut() {
   await clearLocal();
 }
 
-export async function createDeviceKey(name: string): Promise<string> {
-  const { data, error } = await supabase.rpc("create_device_key", { p_name: name });
+export async function createDeviceKey(name: string, write = false): Promise<string> {
+  const { data, error } = await supabase.rpc("create_device_key", write ? { p_name: name, p_write: true } : { p_name: name });
   if (error) throw new Error(error.message);
   return data as string;
+}
+
+/** Abilita alla scrittura la chiave del telefono (per l'invio ad app chiusa). false = chiave non piu' esistente. */
+export async function enableDeviceWrite(key: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("enable_device_write", { p_key: key });
+  if (error) throw new Error(error.message);
+  return !!data;
 }
