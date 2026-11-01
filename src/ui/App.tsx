@@ -8,7 +8,7 @@ import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width,
 import { Icon } from "./icons";
 import { Login } from "./Login";
 import { AgendaView, DayList, DaySheet, MonthView, openNew, QuickAdd, WeekView, YearView } from "./views";
-import { Calendars, CalToggles, ChoiceSheet, Detail, Drawer, Editor, QuickSheet, RemSheet, Scope, Search, SettingsPage, ShiftsPage, SideMini, TrofeoPage } from "./overlays";
+import { CalEditSheet, Calendars, CalToggles, ChoiceSheet, ConfirmSheet, Detail, Drawer, Editor, QuickSheet, RemSheet, Scope, Search, SettingsPage, ShiftsPage, SideMini, TrofeoPage } from "./overlays";
 
 function useTheme() {
   const t = settings.value.theme;
@@ -201,7 +201,9 @@ function Overlays() {
           case "drawer": return <Drawer />;
           case "trofeo": return <TrofeoPage />;
           case "rem": return <RemSheet allDay={o.allDay} start={o.start} value={o.value} onPick={o.onPick} none={o.none} />;
-          case "choice": return <ChoiceSheet title={o.title} options={o.options} value={o.value} onPick={o.onPick} />;
+          case "choice": return <ChoiceSheet title={o.title} options={o.options} value={o.value} onPick={o.onPick} danger={o.danger} />;
+          case "calEdit": return <CalEditSheet id={o.id} />;
+          case "confirm": return <ConfirmSheet title={o.title} text={o.text} ok={o.ok} danger={o.danger} onOk={o.onOk} />;
           case "shifts": return <ShiftsPage />;
         }
       })}

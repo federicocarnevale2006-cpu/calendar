@@ -13,7 +13,9 @@ export type Overlay =
   | { t: "drawer" }
   | { t: "trofeo" }
   | { t: "rem"; allDay: boolean; start?: Date; value: number | null; onPick: (m: number | null) => void; none?: boolean }
-  | { t: "choice"; title: string; options: [string, string][]; value: string; onPick: (v: string) => void }
+  | { t: "choice"; title: string; options: [string, string][]; value: string; onPick: (v: string) => void; danger?: string[] }
+  | { t: "calEdit"; id: string | null }
+  | { t: "confirm"; title: string; text: string; ok: string; danger?: boolean; onOk: () => void }
   | { t: "shifts" };
 
 export const cursor = signal<Date>(startOfDay(new Date()));

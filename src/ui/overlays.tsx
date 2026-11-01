@@ -148,7 +148,7 @@ const NUM_LABELS = Array.from({ length: MAXN + 1 }, (_, i) => String(i));
 const DAY_LABELS = Array.from({ length: MAXD + 1 }, (_, i) => (i === 0 ? "Il giorno stesso" : i === 1 ? "1 giorno prima" : `${i} giorni prima`));
 
 /** Scelta da un elenco nello stile dell'app (al posto del menu di sistema). */
-export function ChoiceSheet({ title, options, value, onPick }: { title: string; options: [string, string][]; value: string; onPick: (v: string) => void }) {
+export function ChoiceSheet({ title, options, value, onPick, danger }: { title: string; options: [string, string][]; value: string; onPick: (v: string) => void; danger?: string[] }) {
   return (
     <>
       <div class="scrim top" onClick={pop} />
@@ -157,7 +157,7 @@ export function ChoiceSheet({ title, options, value, onPick }: { title: string; 
         <div class="chtitle">{title}</div>
         <div class="chlist">
           {options.map(([v, l]) => (
-            <button type="button" class={"chopt" + (v === value ? " on" : "")} onClick={() => { pop(); if (v !== value) onPick(v); }}>
+            <button type="button" class={"chopt" + (v === value ? " on" : "") + (danger?.includes(v) ? " danger" : "")} onClick={() => { pop(); if (v !== value) onPick(v); }}>
               <span class="grow">{l}</span>{v === value && <Icon n="check" />}
             </button>
           ))}
@@ -680,70 +680,134 @@ export function Search() {
 
 // ------------------------------------------------------------------------------------------------------ calendari
 export function Calendars({ add: addNow }: { add?: boolean }) {
-  const [editing, setEditing] = useState<string | null>(null);
-  const [fresh, setFresh] = useState<string | null>(null);         // calendario appena creato: nome selezionato, pronto da scrivere
-  const add = () => {
-    const used = new Set(cals.value.filter((x) => !x.deleted).map((x) => x.color));
-    const color = PALETTE.find((p) => !used.has(p)) ?? PALETTE[(cals.value.length * 3) % PALETTE.length];
-    const sort = Math.max(-1, ...cals.value.filter((x) => !x.deleted).map((x) => x.sort)) + 1;
-    const c: Cal = { id: uuid(), name: "Nuovo calendario", color, visible: true, sort, deleted: false };
-    void saveCal(c);
-    setEditing(c.id);
-    setFresh(c.id);
+  useEffect(() => { if (addNow) push({ t: "calEdit", id: null }); }, []);
+  const menu = (c: Cal) => {
+    void tick("cal" + c.id);
+    push({ t: "choice", title: c.name, value: "", danger: ["delete"], options: [["edit", "Modifica"], ["delete", "Elimina"]],
+      onPick: (v) => { if (v === "edit") push({ t: "calEdit", id: c.id }); else askDeleteCal(c); } });
   };
-  useEffect(() => { if (addNow) add(); }, []);
-  const move = (c: Cal, dir: number) => {
-    const list = visibleCals.value;
-    const i = list.findIndex((x) => x.id === c.id), j = i + dir;
+  return (
+    <Page title="Calendari" dialog actions={<button class="iconbtn" aria-label="Aggiungi calendario" onClick={() => push({ t: "calEdit", id: null })}><Icon n="plus" /></button>}>
+      <div class="card">
+        {visibleCals.value.map((c) => <CalRow key={c.id} c={c} onMenu={() => menu(c)} />)}
+      </div>
+      <button class="btn" style={{ width: "100%", marginBottom: "12px" }} onClick={() => push({ t: "calEdit", id: null })}>+ Nuovo calendario</button>
+      <div class="note">Tieni premuto un calendario (sul PC: tasto destro) per modificarlo o eliminarlo. Con l'interruttore nascondi un calendario senza cancellarne gli eventi.</div>
+    </Page>
+  );
+}
+
+/** Riga di un calendario: tenendo premuto (o col tasto destro) si apre il menu Modifica / Elimina; un tocco apre la modifica. */
+function CalRow({ c, onMenu }: { c: Cal; onMenu: () => void }) {
+  const t = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const fired = useRef(0);
+  const clear = () => { if (t.current) { clearTimeout(t.current); t.current = null; } start.current = null; };
+  const open = () => { if (Date.now() - fired.current < 700) return; fired.current = Date.now(); clear(); onMenu(); };
+  return (
+    <div class="row calrow" onContextMenu={(e) => { e.preventDefault(); open(); }}
+      onPointerDown={(e) => { if (e.button !== 0) return; start.current = { x: e.clientX, y: e.clientY }; t.current = setTimeout(open, 450); }}
+      onPointerMove={(e) => { const s0 = start.current; if (s0 && Math.hypot(e.clientX - s0.x, e.clientY - s0.y) > 10) clear(); }}
+      onPointerUp={clear} onPointerCancel={clear} onPointerLeave={clear}>
+      <span class="cdot" style={{ background: c.color, width: "18px", height: "18px" }} />
+      <button type="button" class="grow lab calname" onClick={() => { if (Date.now() - fired.current > 700) push({ t: "calEdit", id: c.id }); }}>{c.name}</button>
+      <Switch on={c.visible} label="Visibile" onChange={(v) => void saveCal({ ...c, visible: v })} />
+    </div>
+  );
+}
+
+function askDeleteCal(c: Cal) {
+  if (visibleCals.value.length <= 1) { showToast("Serve almeno un calendario: creane un altro prima di eliminare questo"); return; }
+  const n = events.value.filter((e) => e.calendar_id === c.id).length;
+  push({ t: "confirm", title: `Eliminare «${c.name}»?`, ok: "Elimina", danger: true,
+    text: n ? `Verranno eliminati anche i suoi ${n === 1 ? "1 evento" : `${n} eventi`}, su tutti i dispositivi.` : "Il calendario è vuoto.",
+    onOk: () => {
+      void saveCal({ ...c, deleted: true });
+      for (const e of events.value) if (e.calendar_id === c.id) void deleteEvent(e.id);
+      if (settings.value.defaultCal === c.id) setSettings({ defaultCal: null });
+      showToast(`«${c.name}» eliminato`);
+    } });
+}
+
+/** Modifica (o creazione) di un calendario: nome, colore, posizione nell'elenco. */
+export function CalEditSheet({ id }: { id: string | null }) {
+  const orig = id ? cals.value.find((x) => x.id === id) : undefined;
+  const used = new Set(cals.value.filter((x) => !x.deleted).map((x) => x.color));
+  const [name, setName] = useState(orig?.name ?? "");
+  const [color, setColor] = useState(orig?.color ?? (PALETTE.find((p) => !used.has(p)) ?? PALETTE[(cals.value.length * 3) % PALETTE.length]));
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (!orig) setTimeout(() => ref.current?.focus(), 200); }, []);
+  const list = visibleCals.value;
+  const idx = orig ? list.findIndex((x) => x.id === orig.id) : -1;
+  const move = (dir: number) => {
+    if (!orig) return;
+    const i = list.findIndex((x) => x.id === orig.id), j = i + dir;
     if (i < 0 || j < 0 || j >= list.length) return;
     const order = list.map((x) => x.id);
     [order[i], order[j]] = [order[j], order[i]];
-    order.forEach((id, k) => { const x = list.find((y) => y.id === id)!; if (x.sort !== k) void saveCal({ ...x, sort: k }); });
+    order.forEach((cid, k) => { const x = list.find((y) => y.id === cid)!; if (x.sort !== k) void saveCal({ ...x, sort: k }); });
   };
+  const save = () => {
+    const nm = name.trim();
+    if (!nm) { ref.current?.focus(); return; }
+    if (orig) void saveCal({ ...(cals.value.find((x) => x.id === orig.id) ?? orig), name: nm, color });
+    else {
+      const sort = Math.max(-1, ...cals.value.filter((x) => !x.deleted).map((x) => x.sort)) + 1;
+      void saveCal({ id: uuid(), name: nm, color, visible: true, sort, deleted: false });
+      showToast(`Calendario «${nm}» creato`);
+    }
+    pop();
+  };
+  if (id && !orig) { setTimeout(pop, 0); return null; }
   return (
-    <Page title="Calendari" dialog actions={<button class="iconbtn" aria-label="Aggiungi calendario" onClick={add}><Icon n="plus" /></button>}>
-      <div class="card">
-        {visibleCals.value.map((c) => (
-          <div>
-            <div class="row">
-              <span class="cdot" style={{ background: c.color, width: "18px", height: "18px" }} />
-              <input class="inp grow" value={c.name} maxLength={80} onFocus={() => setEditing(c.id)}
-                ref={(el) => { if (el && fresh === c.id) { el.focus(); el.select(); setFresh(null); } }}
-                onChange={(e) => { const v = (e.target as HTMLInputElement).value.trim(); if (v) void saveCal({ ...c, name: v }); }} />
-              <Switch on={c.visible} label="Visibile" onChange={(v) => void saveCal({ ...c, visible: v })} />
-            </div>
-            {editing === c.id && (
-              <>
-                <div class="palette">
-                  {PALETTE.map((p) => <button aria-label={p} class={c.color === p ? "on" : ""} style={{ background: p, color: p }} onClick={() => void saveCal({ ...c, color: p })}>{c.color === p && <Icon n="check" s />}</button>)}
-                  <label class={"custom" + (!PALETTE.includes(c.color) ? " on" : "")} title="Colore a scelta" style={{ color: c.color }}>
-                    <input type="color" value={c.color} onChange={(e) => void saveCal({ ...c, color: (e.target as HTMLInputElement).value.toLowerCase() })} />
-                    {!PALETTE.includes(c.color) ? <Icon n="check" s /> : <Icon n="palette" s />}
-                  </label>
-                </div>
-                <div style={{ display: "flex", gap: "8px", padding: "0 14px 12px", justifyContent: "flex-end", alignItems: "center" }}>
-                  <button class="iconbtn" aria-label="Sposta su" title="Sposta su" onClick={() => move(c, -1)}><Icon n="left" style={{ transform: "rotate(90deg)" }} /></button>
-                  <button class="iconbtn" aria-label="Sposta giù" title="Sposta giù" onClick={() => move(c, 1)}><Icon n="right" style={{ transform: "rotate(90deg)" }} /></button>
-                  <div style={{ flex: 1 }} />
-                  {visibleCals.value.length > 1 && (
-                    <button class="btn danger" onClick={() => {
-                      const n = events.value.filter((e) => e.calendar_id === c.id).length;
-                      if (n && !confirm(`Eliminare «${c.name}» e i suoi ${n} eventi?`)) return;
-                      void saveCal({ ...c, deleted: true });
-                      for (const e of events.value) if (e.calendar_id === c.id) void deleteEvent(e.id);
-                      setEditing(null);
-                    }}>Elimina</button>
-                  )}
-                  <button class="btn" onClick={() => setEditing(null)}>Fatto</button>
-                </div>
-              </>
-            )}
+    <>
+      <div class="scrim top" onClick={pop} />
+      <div class="sheet calsheet" role="dialog" aria-label={orig ? "Modifica calendario" : "Nuovo calendario"}>
+        <div class="grip" />
+        <div class="chtitle">{orig ? "Modifica calendario" : "Nuovo calendario"}</div>
+        <div class="row"><span class="cdot" style={{ background: color, width: "22px", height: "22px" }} />
+          <input ref={ref} class="inp bigtitle grow" placeholder="Nome del calendario" value={name} maxLength={80}
+            onInput={(e) => setName((e.target as HTMLInputElement).value)} onKeyDown={(e) => { if (e.key === "Enter") save(); }} /></div>
+        <div class="palette">
+          {PALETTE.map((p) => <button aria-label={p} class={color === p ? "on" : ""} style={{ background: p, color: p }} onClick={() => setColor(p)}>{color === p && <Icon n="check" s />}</button>)}
+          <label class={"custom" + (!PALETTE.includes(color) ? " on" : "")} title="Colore a scelta" style={{ color }}>
+            <input type="color" value={color} onInput={(e) => setColor((e.target as HTMLInputElement).value.toLowerCase())} />
+            {!PALETTE.includes(color) ? <Icon n="check" s /> : <Icon n="palette" s />}
+          </label>
+        </div>
+        {orig && list.length > 1 && (
+          <div class="row"><div class="grow lab">Posizione nell'elenco</div>
+            <button class="iconbtn" aria-label="Sposta su" disabled={idx <= 0} onClick={() => move(-1)}><Icon n="left" style={{ transform: "rotate(90deg)" }} /></button>
+            <button class="iconbtn" aria-label="Sposta giù" disabled={idx >= list.length - 1} onClick={() => move(1)}><Icon n="right" style={{ transform: "rotate(90deg)" }} /></button>
           </div>
-        ))}
+        )}
+        <div class="rembtns">
+          {orig && <button class="btn danger" onClick={() => { pop(); askDeleteCal(orig); }}>Elimina</button>}
+          <span class="grow" />
+          <button class="btn" onClick={pop}>Annulla</button>
+          <button class="btn primary" disabled={!name.trim()} onClick={save}>{orig ? "Salva" : "Crea"}</button>
+        </div>
       </div>
-      <button class="btn" style={{ width: "100%", marginBottom: "12px" }} onClick={add}>+ Nuovo calendario</button>
-      <div class="note">Tocca il nome per cambiarlo, scegliere il colore (anche uno a piacere con la tavolozza) e l'ordine. Con l'interruttore nascondi un calendario senza cancellarne gli eventi.</div>
-    </Page>
+    </>
+  );
+}
+
+/** Conferma nello stile dell'app (al posto della finestra di sistema). */
+export function ConfirmSheet({ title, text, ok, danger, onOk }: { title: string; text: string; ok: string; danger?: boolean; onOk: () => void }) {
+  return (
+    <>
+      <div class="scrim top" onClick={pop} />
+      <div class="sheet confirmsheet" role="alertdialog" aria-label={title}>
+        <div class="grip" />
+        <div class="chtitle">{title}</div>
+        {text && <div class="note" style={{ fontSize: "14.5px", padding: "0 20px 6px" }}>{text}</div>}
+        <div class="rembtns">
+          <span class="grow" />
+          <button class="btn" onClick={pop}>Annulla</button>
+          <button class={"btn " + (danger ? "dangerfill" : "primary")} onClick={() => { pop(); onOk(); }}>{ok}</button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -965,7 +1029,7 @@ export function SettingsPage() {
         </div>
       )}
       <div class="card">
-        <button class="row click" onClick={() => { if (confirm("Uscire dall'account? Gli eventi restano salvati online.")) { closeAll(); void signOut(); } }}><Icon n="logout" /><div class="grow lab">Esci dall'account</div></button>
+        <button class="row click" onClick={() => push({ t: "confirm", title: "Uscire dall'account?", text: "Gli eventi restano salvati online: rientrando li ritrovi.", ok: "Esci", danger: true, onOk: () => { closeAll(); void signOut(); } })}><Icon n="logout" /><div class="grow lab">Esci dall'account</div></button>
       </div>
       <div class="note" style={{ textAlign: "center" }}>Calendario {APP_VERSION}{isAndroid ? " · Android" : isTauri ? " · Windows" : ""}</div>
     </Page>

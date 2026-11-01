@@ -390,3 +390,12 @@ textarea.inp.code { display: block; width: calc(100% - 36px); resize: none; font
 .privacy ul { margin: 0 0 10px; padding: 0 18px 0 58px; display: grid; gap: 8px; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
 .privacy ul b { color: var(--text); font-weight: 600; }
 .steps .btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
+/* calendari: tenendo premuto Modifica / Elimina */
+.calrow { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.calrow .calname { text-align: left; font-size: 15.5px; padding: 6px 0; color: inherit; }
+.calrow:active { background: var(--surface2); }
+.calsheet, .confirmsheet { z-index: 51; padding: 0 0 calc(12px + var(--safe-b)); }
+.calsheet .grip, .confirmsheet .grip { width: 40px; height: 4px; border-radius: 2px; background: var(--faint); margin: 8px auto 6px; opacity: .6; }
+.calsheet .palette { padding: 4px 18px 10px; }
+.chopt.danger { color: var(--danger); }
+.btn.dangerfill { background: var(--danger); color: #fff; }
