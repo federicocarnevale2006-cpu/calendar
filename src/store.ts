@@ -323,23 +323,53 @@ async function mergeRows(table: "events" | "cals", rows: any[]) {
   }
 }
 
+// Il server cancella per sempre le righe eliminate da piu' di 30 giorni (pulizia del database). Un dispositivo che non si
+// sincronizza da piu' di 25 giorni potrebbe non aver visto quelle eliminazioni: in quel caso rilegge tutto da capo e toglie
+// le righe che sul server non ci sono piu' (tranne le modifiche locali non ancora inviate).
+const RESYNC_MS = 25 * 86400000;
+
+async function dropMissing(table: "events" | "cals", seen: Set<string>) {
+  const d = await getDb();
+  const pend = new Set(((await d.getAllKeys("outbox")) as string[]).filter((k) => k.startsWith(table + ":")).map((k) => k.slice(table.length + 1)));
+  const gone = ((await d.getAllKeys(table)) as string[]).filter((id) => !seen.has(id) && !pend.has(id));
+  if (!gone.length) return;
+  const tx = d.transaction(table, "readwrite");
+  for (const id of gone) void tx.store.delete(id);
+  await tx.done;
+  if (table === "events") {
+    const m = new Map(evMap.value);
+    for (const id of gone) m.delete(id);
+    evMap.value = m;
+  } else {
+    const g = new Set(gone);
+    cals.value = cals.value.filter((c) => !g.has(c.id));
+  }
+}
+
 async function pull() {
+  const okAt = await meta<number>("pulled_ok");
+  const full = typeof okAt === "number" && Date.now() - okAt > RESYNC_MS;
   for (const table of ["cals", "events"] as const) {
-    let since = (await meta<string>("since_" + table)) || "1970-01-01T00:00:00Z";
+    let since = (!full && (await meta<string>("since_" + table))) || "1970-01-01T00:00:00Z";
+    const seen = new Set<string>();
+    let complete = false;
     for (let page = 0; page < 50; page++) {
       const q = supabase.from(TABLE[table]).select("*").gt("updated_at", new Date(new Date(since).getTime() - 2000).toISOString())
         .order("updated_at", { ascending: true }).limit(1000);
       const { data, error } = await q;
       if (error) throw new Error(error.message);
       await mergeRows(table, data || []);
-      if (!data || !data.length) break;
+      for (const r of data || []) seen.add(r.id);
+      if (!data || !data.length) { complete = true; break; }
       const last = data[data.length - 1].updated_at as string;
-      if (last === since) break;
+      if (last === since) { complete = true; break; }
       since = last;
       await setMeta("since_" + table, since);
-      if (data.length < 1000) break;
+      if (data.length < 1000) { complete = true; break; }
     }
+    if (full && complete) await dropMissing(table, seen);
   }
+  await setMeta("pulled_ok", Date.now());
 }
 
 // prova senza rete (solo per i test: indirizzo con ?demo=1)
