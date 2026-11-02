@@ -60,6 +60,16 @@ async function openApp({ port = 8790, viewport = { width: 420, height: 860 }, db
       if ((req.headers()["accept"] || "").includes("vnd.pgrst.object")) return db.prefs ? route.fulfill({ json: db.prefs }) : route.fulfill({ status: 406, json: { code: "PGRST116", message: "0 rows" } });
       return route.fulfill({ json: db.prefs ? [db.prefs] : [] });
     }
+    if (u.pathname.startsWith("/rest/v1/device_keys")) {
+      db.keys = db.keys || [];
+      if (m === "DELETE") {
+        const ids = ((u.searchParams.get("id") || "").match(/in\.\((.*)\)/) || [, ""])[1].split(",").map((x) => x.replace(/"/g, "")).filter(Boolean);
+        db.writes.push({ table: "device_keys", del: ids });
+        db.keys = db.keys.filter((k) => !ids.includes(k.id));
+        return route.fulfill({ status: 204, body: "" });
+      }
+      return route.fulfill({ json: db.keys });
+    }
     if (u.pathname.startsWith("/rest/v1/rpc/create_shift_key")) return route.fulfill({ json: "tl_chiave_di_prova" });
     if (u.pathname.startsWith("/rest/v1/rpc")) return route.fulfill({ json: null });
     return route.fulfill({ json: [] });

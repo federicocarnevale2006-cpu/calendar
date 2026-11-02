@@ -17,7 +17,8 @@ export type Overlay =
   | { t: "calEdit"; id: string | null }
   | { t: "confirm"; title: string; text: string; ok: string; danger?: boolean; onOk: () => void }
   | { t: "shifts" }
-  | { t: "multimark" };
+  | { t: "multimark" }
+  | { t: "devices" };
 
 export const cursor = signal<Date>(startOfDay(new Date()));
 export const selDay = signal<Date | null>(null);

@@ -212,6 +212,13 @@ public final class CalReminders {
                 .setWhen(System.currentTimeMillis())
                 .setShowWhen(true)
                 .setContentIntent(CalWidgets.openApp(ctx, null, 300));
+        // privacy: sulla schermata di blocco, se in Android e' scelto «nascondi contenuti sensibili», si vede solo «Promemoria»
+        // (niente titolo dell'evento); a telefono sbloccato la notifica e' completa
+        b.setVisibility(Notification.VISIBILITY_PRIVATE);
+        Notification.Builder pub = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(ctx, CHANNEL) : new Notification.Builder(ctx);
+        pub.setSmallIcon(R.drawable.ic_stat_cal).setContentTitle("Promemoria").setContentText("Calendario")
+                .setCategory(Notification.CATEGORY_REMINDER);
+        b.setPublicVersion(pub.build());
         try { nm.notify(notifId(key), b.build()); } catch (SecurityException ignored) { }
     }
 

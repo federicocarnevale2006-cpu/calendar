@@ -210,6 +210,7 @@ function Overlays() {
           case "calEdit": return <LazyPage name="CalEditSheet" props={{ id: o.id }} />;
           case "confirm": return <ConfirmSheet title={o.title} text={o.text} ok={o.ok} danger={o.danger} onOk={o.onOk} />;
           case "shifts": return <LazyPage name="ShiftsPage" />;
+          case "devices": return <LazyPage name="DevicesPage" />;
         }
       })}
       {toast.value && (

@@ -272,6 +272,66 @@ export function ShiftsPage() {
   );
 }
 
+// ---------------------------------------------------------------------------------------- dispositivi collegati
+interface DevKey { id: string; name: string; scope: string; can_write: boolean; created_at: string; last_used: string | null; key_hash: string }
+async function sha256hex(t: string): Promise<string> {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+  return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+/** Le chiavi dei dispositivi (Trofeo LCD, widget del telefono, script della mail): si vede quando sono state usate l'ultima
+ * volta e si possono scollegare. Una chiave scollegata smette subito di funzionare. */
+export function DevicesPage() {
+  const [keys, setKeys] = useState<DevKey[] | null>(null);
+  const [mine, setMine] = useState("");
+  const [err, setErr] = useState("");
+  const load = async () => {
+    const { data, error } = await supabase.from("device_keys").select("id,name,scope,can_write,created_at,last_used,key_hash").order("created_at", { ascending: false });
+    if (error) { setErr(error.message); setKeys([]); return; }
+    setKeys(data as DevKey[]);
+  };
+  useEffect(() => {
+    void load();
+    const uid = session.value?.user.id;
+    let k = "";
+    try { k = uid ? localStorage.getItem("widget-key-" + uid) || "" : ""; } catch { /* */ }
+    if (k) void sha256hex(k).then(setMine);
+  }, []);
+  const DAY = 86400000;
+  const idle = (k: DevKey) => !k.last_used ? Date.now() - new Date(k.created_at).getTime() > DAY : Date.now() - new Date(k.last_used).getTime() > 14 * DAY;
+  const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`; };
+  const remove = async (ids: string[]) => {
+    const { error } = await supabase.from("device_keys").delete().in("id", ids);
+    if (error) { setErr(error.message); return; }
+    showToast(ids.length === 1 ? "Dispositivo scollegato" : `${ids.length} dispositivi scollegati`);
+    void load();
+  };
+  const ask = (k: DevKey) => push({ t: "confirm", title: `Scollegare «${k.name}»?`, danger: true, ok: "Scollega",
+    text: k.key_hash === mine ? "È la chiave di questo telefono: widget e invio ad app chiusa si fermano finché l'app non ne crea una nuova (succede da sola alla prossima apertura con la rete)."
+      : k.scope === "shifts" ? "Se è la chiave dello script in uso, la mail dei turni smette di arrivare finché non copi di nuovo lo script."
+      : "Smette subito di funzionare. Se è il Trofeo LCD in uso, va ricollegato dalla pagina Trofeo LCD.",
+    onOk: () => void remove([k.id]) });
+  const old = (keys || []).filter((k) => idle(k) && k.key_hash !== mine);
+  return (
+    <Page title="Dispositivi collegati" dialog>
+      <div class="note">Ogni dispositivo che legge il calendario senza il tuo accesso (Trofeo LCD, widget del telefono, script della mail) ha una chiave tutta sua. Se uno non lo usi più, scollegalo: la sua chiave smette subito di funzionare.</div>
+      {old.length > 0 && <div class="card"><button class="row click" onClick={() => push({ t: "confirm", title: `Scollegare ${old.length} ${old.length === 1 ? "dispositivo" : "dispositivi"}?`, danger: true, ok: "Scollega",
+        text: "Quelli mai usati o fermi da più di 14 giorni. Quelli in uso restano collegati.", onOk: () => void remove(old.map((k) => k.id)) })}>
+        <Icon n="close" /><div class="grow"><div class="lab">Scollega quelli non usati</div><div class="val">{old.length} mai usati o fermi da più di 14 giorni</div></div></button></div>}
+      <div class="card">
+        {keys === null ? <div class="row"><div class="val">…</div></div> : !keys.length ? <div class="row"><div class="val">Nessun dispositivo collegato</div></div> : keys.map((k) => (
+          <div class="row devrow">
+            <Icon n={k.scope === "shifts" ? "notes" : k.name.includes("Trofeo") ? "monitor" : "cal"} />
+            <div class="grow"><div class="lab">{k.name}{k.key_hash === mine ? " · questo telefono" : ""}</div>
+              <div class="val">{k.scope === "shifts" ? "Solo aggiunge i riposi" : k.can_write ? "Legge e scrive" : "Solo lettura"} · creato il {fmt(k.created_at)} · {k.last_used ? `ultimo uso ${fmt(k.last_used)}` : "mai usato"}</div></div>
+            <button class="btn" onClick={() => ask(k)}>Scollega</button>
+          </div>
+        ))}
+      </div>
+      {err && <div class="note" style={{ color: "var(--danger)" }}>{err}</div>}
+    </Page>
+  );
+}
+
 async function copyText(t: string) {
   try { await navigator.clipboard.writeText(t); return; } catch { /* sotto: metodo vecchio */ }
   const ta = document.createElement("textarea");
@@ -409,6 +469,7 @@ export function SettingsPage() {
         <button class="row click" onClick={() => push({ t: "trofeo" })}><Icon n="monitor" /><div class="grow"><div class="lab">Trofeo LCD</div><div class="val">Eventi sul widget Calendario</div></div><Icon n="right" /></button>
         <button class="row click" onClick={() => push({ t: "shifts" })}><Icon n="notes" /><div class="grow"><div class="lab">Turni dalla mail</div><div class="val">Giorni di riposo inseriti da soli dalla mail dei turni</div></div><Icon n="right" /></button>
         <button class="row click" onClick={() => push({ t: "calendars" })}><Icon n="folder" /><div class="grow"><div class="lab">Calendari</div><div class="val">{visibleCals.value.map((c) => c.name).join(", ")}</div></div><Icon n="right" /></button>
+        <button class="row click" onClick={() => push({ t: "devices" })}><Icon n="monitor" /><div class="grow"><div class="lab">Dispositivi collegati</div><div class="val">Chi può leggere o scrivere il calendario senza il tuo accesso</div></div><Icon n="right" /></button>
       </div>
       <div class="card">
         <div class="row"><Icon n="cal" /><div class="grow lab">La settimana inizia di</div>
