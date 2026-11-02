@@ -1,12 +1,12 @@
 import { useState } from "preact/hooks";
 import { supabase } from "../store";
 import { APK_URL, EXE_URL } from "../config";
-import { loginEmail } from "../account";
+import { loginEmail, rememberAccountEmail } from "../account";
 import { isAndroid, isTauri } from "../platform";
 
 function itErr(m: string): string {
   const s = m.toLowerCase();
-  if (s.includes("invalid login")) return "Nome utente o password sbagliati.";
+  if (s.includes("invalid login")) return "Email o password sbagliate.";
   if (s.includes("already registered") || s.includes("already been registered")) return "Esiste già un account con questa email: accedi.";
   if (s.includes("password should be") || s.includes("weak")) return "Password troppo corta: almeno 6 caratteri.";
   if (s.includes("valid email") || s.includes("invalid format")) return "Email non valida.";
@@ -28,11 +28,12 @@ export function Login() {
     setBusy(true);
     try {
       if (mode === "up") {
-        const { error } = await supabase.auth.signUp({ email: loginEmail(email), password: pw });
+        const { error } = await supabase.auth.signUp({ email: await loginEmail(email), password: pw });
         if (error) throw error;
       }
-      const { error } = await supabase.auth.signInWithPassword({ email: loginEmail(email), password: pw });
+      const { error } = await supabase.auth.signInWithPassword({ email: await loginEmail(email), password: pw });
       if (error) throw error;
+      rememberAccountEmail(email);
     } catch (x: any) {
       setErr(itErr(String(x?.message || x)));
     } finally {
@@ -45,7 +46,7 @@ export function Login() {
         <div class="logo">{new Date().getDate()}</div>
         <h1>{mode === "in" ? "Accedi" : "Crea l'account"}</h1>
         <p>Lo stesso account sul telefono e sul PC: gli eventi si sincronizzano da soli e compaiono anche sullo schermo Trofeo LCD.</p>
-        <div class="field"><input class="inp" type="text" autocomplete="username" autoCapitalize="none" spellcheck={false} placeholder="Nome utente" value={email} onInput={(e) => setEmail((e.target as HTMLInputElement).value)} required /></div>
+        <div class="field"><input class="inp" type="email" autocomplete="email" autoCapitalize="none" spellcheck={false} placeholder="Email" value={email} onInput={(e) => setEmail((e.target as HTMLInputElement).value)} required /></div>
         <div class="field"><input class="inp" type="password" autocomplete={mode === "in" ? "current-password" : "new-password"} placeholder="Password" value={pw} onInput={(e) => setPw((e.target as HTMLInputElement).value)} required minLength={6} /></div>
         <div class="err">{err}</div>
         <button class="btn primary" disabled={busy}>{busy ? "Attendi…" : mode === "in" ? "Accedi" : "Crea account"}</button>

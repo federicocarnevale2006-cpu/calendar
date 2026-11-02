@@ -354,7 +354,7 @@ export function PasswordPage() {
   };
   return (
     <Page title="Cambia password" dialog>
-      <div class="note">Usa una password lunga (almeno 12 caratteri) che non usi da nessun'altra parte: il calendario non manda mail per recuperarla, quindi è l'unica chiave per entrare. Se la dimentichi, si reimposta dal pannello di Supabase.</div>
+      <div class="note">Usa una password lunga (almeno 12 caratteri) che non usi da nessun'altra parte. Per sicurezza il calendario non manda mai mail di recupero (nessuno può entrare dalla tua casella di posta): la password è l'unica chiave. Se la dimentichi, si reimposta dal pannello di Supabase.</div>
       <div class="card">
         <div class="row"><div class="grow"><div class="lab">Password attuale</div>
           <input class="inp" type="password" autoComplete="current-password" value={cur} style={{ marginTop: "6px", width: "100%" }} onInput={(e) => setCur((e.target as HTMLInputElement).value)} /></div></div>
