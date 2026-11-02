@@ -39,6 +39,28 @@ fn write_trofeo_events(json: String) -> Result<(), String> {
     Ok(())
 }
 
+/// L'account del calendario puo' cambiare indirizzo (ora si accede con un nome utente): si aggiorna solo il campo «email»
+/// del collegamento di Trofeo (la chiave resta la stessa), cosi' Trofeo continua a leggere subito gli eventi dall'app per PC.
+#[tauri::command]
+fn set_trofeo_link_email(email: String) -> Result<bool, String> {
+    let dir = trofeo_dir()?;
+    let p = dir.join("calendario.json");
+    if !p.exists() {
+        return Ok(false);
+    }
+    let txt = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
+    let mut v: serde_json::Value = serde_json::from_str(&txt).map_err(|e| format!("collegamento non valido: {e}"))?;
+    let obj = v.as_object_mut().ok_or("collegamento non valido")?;
+    if obj.get("email").and_then(|x| x.as_str()) == Some(email.as_str()) {
+        return Ok(false);
+    }
+    obj.insert("email".into(), serde_json::Value::String(email));
+    let tmp = dir.join("calendario.json.tmp");
+    std::fs::write(&tmp, serde_json::to_string(&v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 #[tauri::command]
 fn read_trofeo_link() -> Option<String> {
     let p = trofeo_dir().ok()?.join("calendario.json");
@@ -251,6 +273,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             write_trofeo_link,
             read_trofeo_link,
+            set_trofeo_link_email,
             write_trofeo_events,
             install_update,
             restart_app,

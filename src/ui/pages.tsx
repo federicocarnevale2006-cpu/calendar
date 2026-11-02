@@ -12,6 +12,7 @@ import { autostart, autoUpdatePC, isAndroid, isTauri, nativePushStatus, openUrl,
 import { pop, push, showToast, closeAll } from "./state";
 import { Icon } from "./icons";
 import { GMAIL_MANIFEST, gmailScript, SENDER_RE } from "../gmailScript";
+import { accountName } from "../account";
 
 import { Choice, Page, Switch, remLabel } from "./common";
 
@@ -332,6 +333,44 @@ export function DevicesPage() {
   );
 }
 
+// -------------------------------------------------------------------------------------------- cambio password
+/** Cambio della password: prima si controlla quella attuale (chi trovasse il telefono sbloccato non puo' cambiarla). */
+export function PasswordPage() {
+  const [cur, setCur] = useState(""), [nw, setNw] = useState(""), [rep, setRep] = useState("");
+  const [busy, setBusy] = useState(false), [err, setErr] = useState("");
+  const tooShort = nw.length > 0 && nw.length < 12, mismatch = rep.length > 0 && rep !== nw;
+  const ok = cur.length > 0 && nw.length >= 12 && nw === rep && nw !== cur;
+  const save = async () => {
+    setBusy(true); setErr("");
+    try {
+      const email = session.value?.user.email || "";
+      const chk = await supabase.auth.signInWithPassword({ email, password: cur });
+      if (chk.error) { setErr(chk.error.message.toLowerCase().includes("invalid") ? "La password attuale non è giusta." : chk.error.message); return; }
+      const { error } = await supabase.auth.updateUser({ password: nw });
+      if (error) { setErr(error.message.toLowerCase().includes("same") ? "La nuova password è uguale a quella di prima." : error.message); return; }
+      pop();
+      showToast("Password cambiata");
+    } finally { setBusy(false); }
+  };
+  return (
+    <Page title="Cambia password" dialog>
+      <div class="note">Usa una password lunga (almeno 12 caratteri) che non usi da nessun'altra parte: il calendario non manda mail per recuperarla, quindi è l'unica chiave per entrare. Se la dimentichi, si reimposta dal pannello di Supabase.</div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="lab">Password attuale</div>
+          <input class="inp" type="password" autoComplete="current-password" value={cur} style={{ marginTop: "6px", width: "100%" }} onInput={(e) => setCur((e.target as HTMLInputElement).value)} /></div></div>
+        <div class="row"><div class="grow"><div class="lab">Nuova password</div>
+          <input class="inp" type="password" autoComplete="new-password" value={nw} style={{ marginTop: "6px", width: "100%" }} onInput={(e) => setNw((e.target as HTMLInputElement).value)} />
+          <div class="val">{tooShort ? `Ancora ${12 - nw.length} caratteri` : "Almeno 12 caratteri"}</div></div></div>
+        <div class="row"><div class="grow"><div class="lab">Ripeti la nuova password</div>
+          <input class="inp" type="password" autoComplete="new-password" value={rep} style={{ marginTop: "6px", width: "100%" }} onInput={(e) => setRep((e.target as HTMLInputElement).value)} />
+          {mismatch && <div class="val" style={{ color: "var(--danger)" }}>Non coincide</div>}</div></div>
+      </div>
+      <div style={{ padding: "0 16px" }}><button class="btn primary" style={{ width: "100%" }} disabled={!ok || busy} onClick={save}>{busy ? "Attendi…" : "Cambia password"}</button></div>
+      {err && <div class="note" style={{ color: "var(--danger)" }}>{err}</div>}
+    </Page>
+  );
+}
+
 async function copyText(t: string) {
   try { await navigator.clipboard.writeText(t); return; } catch { /* sotto: metodo vecchio */ }
   const ta = document.createElement("textarea");
@@ -462,7 +501,7 @@ export function SettingsPage() {
   return (
     <Page title="Impostazioni" dialog>
       <div class="card">
-        <div class="row"><Icon n="person" /><div class="grow"><div class="lab">{session.value?.user.email}</div>
+        <div class="row"><Icon n="person" /><div class="grow"><div class="lab">{accountName(session.value?.user.email)}</div>
           <div class="val"><span class={"status " + ss}><i />{ss === "ok" ? `Sincronizzato ${lastSync.value ? hm(new Date(lastSync.value)) : ""}` : ss === "sync" ? "Sincronizzazione…" : ss === "offline" ? "Senza rete: le modifiche partono appena torna" : `Errore: ${syncError.value}`}{pendingCount.value ? ` · ${pendingCount.value} da inviare` : ""}</span></div></div>
           <button class="iconbtn" aria-label="Sincronizza ora" onClick={() => scheduleSync(0)}><Icon n="sync" /></button>
         </div>
@@ -507,6 +546,11 @@ export function SettingsPage() {
         </div>
       )}
       <div class="card">
+        <button class="row click" onClick={() => push({ t: "password" })}><Icon n="person" /><div class="grow"><div class="lab">Cambia password</div><div class="val">Unica e lunga: è l'unico modo per entrare nel calendario</div></div><Icon n="right" /></button>
+        <button class="row click" onClick={() => push({ t: "confirm", title: "Uscire da tutti gli altri dispositivi?", danger: true, ok: "Esci dagli altri",
+          text: "Resti dentro solo qui. Il telefono, il PC o il sito dove sei collegato dovranno rientrare con nome utente e password. I widget e Trofeo LCD non si fermano (usano le loro chiavi, che trovi in Dispositivi collegati).",
+          onOk: () => void supabase.auth.signOut({ scope: "others" }).then(({ error }) => showToast(error ? "Non riuscito: " + error.message : "Uscito da tutti gli altri dispositivi")) })}>
+          <Icon n="logout" /><div class="grow"><div class="lab">Esci da tutti gli altri dispositivi</div><div class="val">Se pensi che qualcuno sia entrato con la tua password</div></div></button>
         <button class="row click" onClick={() => push({ t: "confirm", title: "Uscire dall'account?", text: "Gli eventi restano salvati online: rientrando li ritrovi.", ok: "Esci", danger: true, onOk: () => { closeAll(); void signOut(); } })}><Icon n="logout" /><div class="grow lab">Esci dall'account</div></button>
       </div>
       <div class="note" style={{ textAlign: "center" }}>Calendario {APP_VERSION}{isAndroid ? " · Android" : isTauri ? " · Windows" : ""}</div>

@@ -22,7 +22,7 @@ const ev = (id, title, day, upd, extra = {}) => ({ id, user_id: UID, calendar_id
   deleted: false, created_at: upd, updated_at: upd, source: null, ...extra });
 
 /** Apre l'app con un utente gia' collegato. `db` e' il "server": calendari, eventi, impostazioni e le richieste ricevute. */
-async function openApp({ port = 8790, viewport = { width: 420, height: 860 }, db } = {}) {
+async function openApp({ port = 8790, viewport = { width: 420, height: 860 }, db, loggedIn = true } = {}) {
   const srv = await staticServer(port);
   const session = { access_token: "tok", refresh_token: "ref", token_type: "bearer", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600,
     user: { id: UID, aud: "authenticated", role: "authenticated", email: "prova@example.com", app_metadata: {}, user_metadata: {}, created_at: "2026-10-01T00:00:00Z" } };
@@ -33,12 +33,25 @@ async function openApp({ port = 8790, viewport = { width: 420, height: 860 }, db
   db.writes = [];
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport });
-  await ctx.addInitScript((s) => { if (!localStorage.getItem("calendario-auth")) localStorage.setItem("calendario-auth", JSON.stringify(s)); }, session);
+  if (loggedIn) await ctx.addInitScript((s) => { if (!localStorage.getItem("calendario-auth")) localStorage.setItem("calendario-auth", JSON.stringify(s)); }, session);
+  db.password = db.password || "vecchia-password-123";
+  db.auth = [];
   await ctx.route(SUPA + "/**", async (route) => {
     const req = route.request(), u = new URL(req.url()), m = req.method();
-    if (u.pathname.startsWith("/auth/v1/user")) return route.fulfill({ json: session.user });
-    if (u.pathname.startsWith("/auth/v1/token")) return route.fulfill({ json: session });
-    if (u.pathname.startsWith("/auth/v1/logout")) return route.fulfill({ status: 204, body: "" });
+    if (u.pathname.startsWith("/auth/v1/user")) {
+      if (m === "PUT") { const b = JSON.parse(req.postData() || "{}"); db.auth.push({ what: "update", ...b }); if (b.password) db.password = b.password; }
+      return route.fulfill({ json: session.user });
+    }
+    if (u.pathname.startsWith("/auth/v1/token")) {
+      if (u.searchParams.get("grant_type") === "password") {
+        const b = JSON.parse(req.postData() || "{}");
+        db.auth.push({ what: "login", email: b.email });
+        if (b.password !== db.password) return route.fulfill({ status: 400, json: { code: 400, error_code: "invalid_credentials", msg: "Invalid login credentials" } });
+        session.user.email = b.email;
+      }
+      return route.fulfill({ json: session });
+    }
+    if (u.pathname.startsWith("/auth/v1/logout")) { db.auth.push({ what: "logout", scope: u.searchParams.get("scope") }); return route.fulfill({ status: 204, body: "" }); }
     const t = u.pathname.startsWith("/rest/v1/calendars") ? "cals" : u.pathname.startsWith("/rest/v1/events") ? "events" : null;
     if (t) {
       if (m === "GET") {

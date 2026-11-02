@@ -3,7 +3,7 @@ import { addDays, addMonths, cap, fmtLongDay, MONTHS, MONTHS_SHORT, startOfDay, 
 import { APP_VERSION, SUPABASE_KEY, SUPABASE_URL } from "../config";
 import { calById, cals, createDeviceKey, enableDeviceWrite, evColor, evMap, occurrences, pendingCount, pushKeyBad, ready, scheduleSync, sentSignal, session, settings, setSettings, syncState } from "../store";
 import { holidaysRange } from "../holidays";
-import { autoUpdatePC, checkUpdate, confirmUpdate, isAndroid, isTauri, onBack, onDeepLink, onResume, pushWidgets, writeTrofeoEvents, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, pcUpdate, restartApp, tickTauri, update, writeTrofeoLink } from "../platform";
+import { autoUpdatePC, checkUpdate, confirmUpdate, isAndroid, isTauri, onBack, onDeepLink, onResume, pushWidgets, writeTrofeoEvents, setTrofeoLinkEmail, openUrl, readTrofeoLink, remindersFor, scheduleAndroid, statusBar, pcUpdate, restartApp, tickTauri, update, writeTrofeoLink } from "../platform";
 import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width, now } from "./state";
 import { Icon } from "./icons";
 import { Login } from "./Login";
@@ -141,6 +141,8 @@ function useTrofeoEvents() {
         prefs: { multi_mark: settings.value.multiMark } }))
         .catch((err) => console.warn("eventi per Trofeo", err));
     };
+    // collegamento di Trofeo con l'indirizzo dell'account di adesso (se e' cambiato, Trofeo ignorerebbe il file degli eventi)
+    void setTrofeoLinkEmail(s.user.email ?? "");
     const t = setTimeout(write, 300);
     const iv = setInterval(write, 60000);         // anche senza modifiche, ogni minuto: Trofeo sa che l'app per PC e' aperta
     return () => { clearTimeout(t); clearInterval(iv); };
@@ -211,6 +213,7 @@ function Overlays() {
           case "confirm": return <ConfirmSheet title={o.title} text={o.text} ok={o.ok} danger={o.danger} onOk={o.onOk} />;
           case "shifts": return <LazyPage name="ShiftsPage" />;
           case "devices": return <LazyPage name="DevicesPage" />;
+          case "password": return <LazyPage name="PasswordPage" />;
         }
       })}
       {toast.value && (

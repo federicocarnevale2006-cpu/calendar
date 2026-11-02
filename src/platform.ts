@@ -82,6 +82,11 @@ export async function writeTrofeoEvents(json: string): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
   await invoke("write_trofeo_events", { json });
 }
+export async function setTrofeoLinkEmail(email: string): Promise<boolean> {
+  if (!isTauri) return false;
+  const { invoke } = await import("@tauri-apps/api/core");
+  try { return (await invoke("set_trofeo_link_email", { email })) as boolean; } catch { return false; }
+}
 export async function readTrofeoLink(): Promise<string | null> {
   if (!isTauri) return null;
   const { invoke } = await import("@tauri-apps/api/core");

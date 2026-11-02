@@ -18,7 +18,8 @@ export type Overlay =
   | { t: "confirm"; title: string; text: string; ok: string; danger?: boolean; onOk: () => void }
   | { t: "shifts" }
   | { t: "multimark" }
-  | { t: "devices" };
+  | { t: "devices" }
+  | { t: "password" };
 
 export const cursor = signal<Date>(startOfDay(new Date()));
 export const selDay = signal<Date | null>(null);

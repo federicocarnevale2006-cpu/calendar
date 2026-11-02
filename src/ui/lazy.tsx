@@ -12,7 +12,7 @@ export function loadPages(): Promise<PagesMod> {
   return loading;
 }
 
-export function LazyPage({ name, props }: { name: "SettingsPage" | "Calendars" | "TrofeoPage" | "MultiMarkSheet" | "CalEditSheet" | "ShiftsPage" | "DevicesPage"; props?: Record<string, unknown> }) {
+export function LazyPage({ name, props }: { name: "SettingsPage" | "Calendars" | "TrofeoPage" | "MultiMarkSheet" | "CalEditSheet" | "ShiftsPage" | "DevicesPage" | "PasswordPage"; props?: Record<string, unknown> }) {
   const [m, setM] = useState<PagesMod | null>(mod);
   useEffect(() => { if (!m) void loadPages().then(setM).catch(() => { /* senza rete o file mancante: si riprova alla prossima apertura */ }); }, []);
   if (!m) return null;

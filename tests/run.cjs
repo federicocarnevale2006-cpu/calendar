@@ -1,5 +1,5 @@
 // Tutte le prove dell'app (npm test). Su GitHub girano prima di compilare: se una fallisce, APK ed exe non escono.
-const tests = ["t_base", "t_pages", "t_privacy", "t_devices", "t_sync", "t_multi"];
+const tests = ["t_base", "t_account", "t_pages", "t_privacy", "t_devices", "t_sync", "t_multi"];
 (async () => {
   let ok = true;
   for (const t of tests) {
