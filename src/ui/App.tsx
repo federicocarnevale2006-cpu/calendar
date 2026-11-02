@@ -8,7 +8,9 @@ import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width,
 import { Icon } from "./icons";
 import { Login } from "./Login";
 import { AgendaView, DayList, DaySheet, MonthView, openNew, QuickAdd, WeekView, YearView } from "./views";
-import { CalEditSheet, Calendars, CalToggles, ChoiceSheet, ConfirmSheet, Detail, Drawer, Editor, MultiMarkSheet, QuickSheet, RemSheet, Scope, Search, SettingsPage, ShiftsPage, SideMini, TrofeoPage } from "./overlays";
+import { CalToggles, Detail, Drawer, Editor, QuickSheet, Scope, Search, SideMini } from "./overlays";
+import { ChoiceSheet, ConfirmSheet, RemSheet } from "./common";
+import { LazyPage, loadPages } from "./lazy";
 
 function useTheme() {
   const t = settings.value.theme;
@@ -198,16 +200,16 @@ function Overlays() {
           case "quick": return <QuickSheet ev={o.ev} />;
           case "scope": return <Scope occ={o.occ} action={o.action} />;
           case "search": return <Search />;
-          case "settings": return <SettingsPage />;
-          case "calendars": return <Calendars add={o.add} />;
+          case "settings": return <LazyPage name="SettingsPage" />;
+          case "calendars": return <LazyPage name="Calendars" props={{ add: o.add }} />;
           case "drawer": return <Drawer />;
-          case "trofeo": return <TrofeoPage />;
+          case "trofeo": return <LazyPage name="TrofeoPage" />;
           case "rem": return <RemSheet allDay={o.allDay} start={o.start} value={o.value} onPick={o.onPick} none={o.none} />;
           case "choice": return <ChoiceSheet title={o.title} options={o.options} value={o.value} onPick={o.onPick} danger={o.danger} />;
-          case "multimark": return <MultiMarkSheet />;
-          case "calEdit": return <CalEditSheet id={o.id} />;
+          case "multimark": return <LazyPage name="MultiMarkSheet" />;
+          case "calEdit": return <LazyPage name="CalEditSheet" props={{ id: o.id }} />;
           case "confirm": return <ConfirmSheet title={o.title} text={o.text} ok={o.ok} danger={o.danger} onOk={o.onOk} />;
-          case "shifts": return <ShiftsPage />;
+          case "shifts": return <LazyPage name="ShiftsPage" />;
         }
       })}
       {toast.value && (
@@ -310,6 +312,7 @@ export function App() {
   useTrofeoAutoLink();
   useWidgets();
   useTrofeoEvents();
+  useEffect(() => { const t = setTimeout(() => { void loadPages().catch(() => { /* si carichera' quando serve */ }); }, 4000); return () => clearTimeout(t); }, []);
   useEffect(() => {
     void onResume(() => scheduleSync(0));
   }, []);

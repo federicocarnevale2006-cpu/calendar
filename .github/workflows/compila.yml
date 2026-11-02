@@ -19,7 +19,24 @@ env:
   BUILD_NUMBER: ${{ github.run_number }}
 
 jobs:
+  # Prima le prove: l'app compilata viene aperta in un browser con un server finto (tests/). Se una prova non passa,
+  # APK ed exe non vengono compilati ne' pubblicati.
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: Browser per le prove
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - run: npm test
+
   android:
+    needs: prove
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +63,7 @@ jobs:
           path: dist
 
   windows:
+    needs: prove
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
