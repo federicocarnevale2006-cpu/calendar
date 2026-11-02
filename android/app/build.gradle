@@ -19,11 +19,12 @@ android {
     }
     signingConfigs {
         release {
-            // chiave fissa (nel repository privato): ogni nuova versione si installa sopra la precedente
+            // Chiave di firma segreta: NON e' nel repository (che e' pubblico). La compilazione su GitHub la ricrea dai
+            // Secrets del repository (CAL_KS_B64 e CAL_KS_PASS); senza, la compilazione si ferma invece di firmare con altro.
             storeFile file("../calendario.keystore")
-            storePassword System.getenv("CAL_KS_PASS") ?: "***"
+            storePassword System.getenv("CAL_KS_PASS")
             keyAlias "calendario"
-            keyPassword System.getenv("CAL_KS_PASS") ?: "***"
+            keyPassword System.getenv("CAL_KS_PASS")
         }
     }
     buildTypes {

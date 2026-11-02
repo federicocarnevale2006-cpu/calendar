@@ -7,3 +7,9 @@ android/build/
 android/.gradle/
 android/local.properties
 *.log
+
+# chiavi e segreti: mai nel repository
+*.keystore
+*.jks
+*.p12
+.env*

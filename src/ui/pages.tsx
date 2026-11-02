@@ -11,7 +11,7 @@ import {
 import { autostart, autoUpdatePC, isAndroid, isTauri, nativePushStatus, openUrl, pcUpdate, readTrofeoLink, restartApp, update, writeTrofeoLink, type PushStatus } from "../platform";
 import { pop, push, showToast, closeAll } from "./state";
 import { Icon } from "./icons";
-import { GMAIL_MANIFEST, gmailScript, SHIFT_SENDER } from "../gmailScript";
+import { GMAIL_MANIFEST, gmailScript, SENDER_RE } from "../gmailScript";
 
 import { Choice, Page, Switch, remLabel } from "./common";
 
@@ -180,6 +180,22 @@ export function ShiftsPage() {
   const setRem = (v: number | null) => { setRemV(v); try { localStorage.setItem("shift-rem", v == null ? "" : String(v)); } catch { /* */ } };
   const [script, setScript] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // indirizzo che manda i turni: scritto qui dall'utente, salvato nel suo account (non nel codice dell'app, che e' pubblico)
+  const [sender, setSenderV] = useState<string>(() => { try { return localStorage.getItem("shift-sender") || ""; } catch { return ""; } });
+  const senderOk = SENDER_RE.test(sender.trim());
+  const keepSender = (v: string) => { try { if (v) localStorage.setItem("shift-sender", v); else localStorage.removeItem("shift-sender"); } catch { /* */ } };
+  const saveSender = async (v: string) => {
+    const uid = session.value?.user.id;
+    if (!uid || !SENDER_RE.test(v)) return;
+    await supabase.from("user_settings").upsert({ user_id: uid, shift_sender: v, updated_at: new Date().toISOString() });
+  };
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase.from("user_settings").select("shift_sender").maybeSingle();
+      const v = (data as { shift_sender?: string | null } | null)?.shift_sender;
+      if (v) { setSenderV(v); keepSender(v); }
+    })();
+  }, []);
   const [err, setErr] = useState("");
   const [log, setLog] = useState<ShiftImport[] | null>(null);
   const loadLog = async () => {
@@ -188,10 +204,13 @@ export function ShiftsPage() {
   };
   useEffect(() => { void loadLog(); const iv = setInterval(() => void loadLog(), 20000); return () => clearInterval(iv); }, []);
   const prepare = async () => {
+    const snd = sender.trim();
+    if (!SENDER_RE.test(snd)) { setErr("Scrivi prima l'indirizzo che ti manda i turni (punto 1)."); return; }
     setBusy(true); setErr("");
     try {
+      await saveSender(snd);
       const key = await createShiftKey();
-      const txt = gmailScript(key, rem == null ? -99999 : rem);
+      const txt = gmailScript(key, snd, rem == null ? -99999 : rem);
       setScript(txt);
       await copyText(txt);
       showToast("Script copiato: incollalo in Google Apps Script");
@@ -204,7 +223,13 @@ export function ShiftsPage() {
     <Page title="Turni dalla mail" dialog>
       <div class="card">
         <div class="row"><Icon n="notes" /><div class="grow"><div class="lab">Giorni di riposo automatici</div>
-          <div class="val">Quando arriva la mail dei turni da {SHIFT_SENDER}, i riposi finiscono da soli nel calendario «Turni». A fine mese si cancellano da soli.</div></div></div>
+          <div class="val">Quando arriva la mail dei turni, i riposi finiscono da soli nel calendario «Turni». A fine mese si cancellano da soli.</div></div></div>
+        <div class="row"><Icon n="person" /><div class="grow"><div class="lab">Indirizzo che ti manda i turni</div>
+          <input class="inp" type="email" inputMode="email" autoComplete="off" spellcheck={false} placeholder="es. turni@azienda.com" value={sender}
+            style={{ marginTop: "6px", width: "100%" }}
+            onInput={(e) => { setSenderV((e.target as HTMLInputElement).value); setScript(null); }}
+            onBlur={() => { const v = sender.trim(); keepSender(v); void saveSender(v); }} />
+          <div class="val">{sender && !senderOk ? "Indirizzo non valido" : "Salvato solo nel tuo account: non è scritto nel codice dell'app."}</div></div></div>
         <button type="button" class="row click" onClick={() => push({ t: "rem", allDay: true, value: rem, none: true, onPick: (v) => { setRem(v); setScript(null); } })}>
           <Icon n="bell" /><div class="grow"><div class="lab">Promemoria per i riposi</div><div class="val">{rem == null ? "Nessuno" : remLabel(rem, true)}</div></div><Icon n="right" />
         </button>
@@ -220,6 +245,7 @@ export function ShiftsPage() {
         <ul>
           <li>Lo script gira <b>solo nel tuo account Google</b>: nessun altro legge la tua posta.</li>
           <li>Ha il permesso di Gmail in <b>sola lettura</b> e cerca solo le mail del mittente dei turni: non può scrivere, inviare o cancellare mail.</li>
+          <li>L'indirizzo dei turni è salvato <b>solo nel tuo account</b>, non nel codice dell'app (che è pubblico).</li>
           <li>Al calendario arrivano <b>solo le date dei riposi</b>: niente testo, oggetto, nomi o orari della mail.</li>
           <li>La chiave dello script può <b>solo aggiungere riposi</b>: non legge e non modifica gli altri eventi.</li>
           <li>Il calendario sta sul tuo spazio Supabase in Europa (Francoforte), con connessione cifrata, visibile solo dal tuo account.</li>
@@ -231,7 +257,7 @@ export function ShiftsPage() {
           <li><b>Hai già lo script della versione prima?</b> Toglili il permesso completo su Gmail: apri la pagina dei collegamenti di Google, scegli «Progetto senza titolo» (o il nome che gli hai dato) e rimuovi l'accesso. Poi continua nello stesso progetto.
             <div><button class="btn" onClick={() => void openUrl("https://myaccount.google.com/connections")}>Apri collegamenti Google</button></div></li>
           <li><b>Copia lo script</b> e incollalo in Google Apps Script al posto di tutto il testo (file «Codice.gs»), poi salva.
-            <div class="btnrow"><button class="btn primary" disabled={busy} onClick={prepare}>{script ? "Copia di nuovo" : "Copia lo script"}</button>
+            <div class="btnrow"><button class="btn primary" disabled={busy || !senderOk} onClick={prepare}>{script ? "Copia di nuovo" : "Copia lo script"}</button>
               <button class="btn" onClick={() => void openUrl("https://script.google.com/home")}>Apri script.google.com</button></div></li>
           <li><b>Gmail in sola lettura</b>: in Apps Script apri «Impostazioni progetto» (ingranaggio a sinistra) e spunta «Mostra il file manifest "appsscript.json" nell'editor». Torna all'editor, apri <b>appsscript.json</b>, cancella tutto, incolla le impostazioni e salva.
             <div><button class="btn" onClick={copyManifest}>Copia le impostazioni</button></div></li>

@@ -48,11 +48,23 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@v4
+      - name: Chiave di firma (dai Secrets, mai nel codice)
+        env:
+          CAL_KS_B64: ${{ secrets.CAL_KS_B64 }}
+          CAL_KS_PASS: ${{ secrets.CAL_KS_PASS }}
+        run: |
+          if [ -z "$CAL_KS_B64" ] || [ -z "$CAL_KS_PASS" ]; then
+            echo "::error::Mancano i Secrets CAL_KS_B64 / CAL_KS_PASS: l'APK non viene firmato ne' pubblicato"; exit 1
+          fi
+          echo "$CAL_KS_B64" | base64 -d > android/calendario.keystore
       - name: APK
         working-directory: android
+        env:
+          CAL_KS_PASS: ${{ secrets.CAL_KS_PASS }}
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
+          rm -f calendario.keystore
       - uses: actions/upload-artifact@v4
         with:
           name: apk

@@ -3,7 +3,8 @@
 // Il testo e' "raw" (String.raw): le barre delle espressioni regolari restano come sono.
 import { SUPABASE_KEY, SUPABASE_URL } from "./config";
 
-export const SHIFT_SENDER = "turni@azienda.com";
+// L'indirizzo che manda i turni non sta nel codice (che e' pubblico): lo scrive l'utente nell'app e resta nel suo account.
+export const SENDER_RE = /^[^\s"'\\<>@]+@[^\s"'\\<>@]+\.[^\s"'\\<>@]+$/;
 
 const TEMPLATE = String.raw`// Calendario · turni dalla mail (versione con Gmail in SOLA LETTURA)
 // Ogni 10 minuti cerca le mail dei turni e mette nel calendario i giorni di riposo, con un promemoria.
@@ -139,10 +140,11 @@ export const GMAIL_MANIFEST = JSON.stringify({
   ],
 }, null, 2);
 
-/** Lo script completo, con la chiave del dispositivo e il promemoria scelto (minuti prima delle 9:00 del giorno). */
-export function gmailScript(key: string, reminder = 1440): string {
+/** Lo script completo, con la chiave del dispositivo, l'indirizzo dei turni e il promemoria (minuti prima delle 9:00 del giorno). */
+export function gmailScript(key: string, sender: string, reminder = 1440): string {
+  if (!SENDER_RE.test(sender)) throw new Error("Indirizzo dei turni non valido");
   return TEMPLATE.replace("__CHIAVE__", key)
-    .replace("__MITTENTE__", SHIFT_SENDER)
+    .replace("__MITTENTE__", sender)
     .replace("__SERVER__", SUPABASE_URL)
     .replace("__APIKEY__", SUPABASE_KEY)
     .replace("__PROMEMORIA__", String(Math.round(reminder)));
