@@ -8,7 +8,7 @@ import { closeAll, cursor, overlays, pop, push, selDay, showToast, toast, width,
 import { Icon } from "./icons";
 import { Login } from "./Login";
 import { AgendaView, DayList, DaySheet, MonthView, openNew, QuickAdd, WeekView, YearView } from "./views";
-import { CalEditSheet, Calendars, CalToggles, ChoiceSheet, ConfirmSheet, Detail, Drawer, Editor, QuickSheet, RemSheet, Scope, Search, SettingsPage, ShiftsPage, SideMini, TrofeoPage } from "./overlays";
+import { CalEditSheet, Calendars, CalToggles, ChoiceSheet, ConfirmSheet, Detail, Drawer, Editor, MultiMarkSheet, QuickSheet, RemSheet, Scope, Search, SettingsPage, ShiftsPage, SideMini, TrofeoPage } from "./overlays";
 
 function useTheme() {
   const t = settings.value.theme;
@@ -69,6 +69,7 @@ let widgetKeySent = "";
 /** Android: i widget della schermata Home ricevono gli eventi a ogni modifica e una chiave per aggiornarsi ad app chiusa. */
 function useWidgets() {
   const s = session.value, m = evMap.value, cs = cals.value, ws = settings.value.weekStart, hol = settings.value.holidays;
+  const mm = settings.value.multiMark;
   // la stessa chiave serve anche a inviare le modifiche ad app chiusa: va abilitata alla scrittura (una volta). Se Android
   // la trova rifiutata (tolta dalle Impostazioni) se ne crea una nuova.
   const online = syncState.value === "ok", bad = pushKeyBad.value;
@@ -111,16 +112,16 @@ function useWidgets() {
         rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], location: e.location, reminders: e.reminders || [] });
       }
       const y = new Date().getFullYear();
-      void pushWidgets({ events: JSON.stringify(rows), holidays: JSON.stringify(hol ? holidaysRange(y - 1, y + 2) : {}), weekStart: ws });
+      void pushWidgets({ events: JSON.stringify(rows), holidays: JSON.stringify(hol ? holidaysRange(y - 1, y + 2) : {}), weekStart: ws, multi: mm });
     }, 1200);
     return () => clearTimeout(t);
-  }, [s?.user.id, m, cs, ws, hol]);
+  }, [s?.user.id, m, cs, ws, hol, mm]);
 }
 
 /** PC: a ogni modifica (anche quelle fatte sul telefono, che arrivano qui in tempo reale) gli eventi vanno subito a
  * Trofeo LCD in un file accanto al collegamento; prima Trofeo li rileggeva da internet una volta al minuto. */
 function useTrofeoEvents() {
-  const s = session.value, m = evMap.value, cs = cals.value;
+  const s = session.value, m = evMap.value, cs = cals.value, mm = settings.value.multiMark;
   useEffect(() => {
     if (!isTauri || !s) return;
     const write = () => {
@@ -134,13 +135,14 @@ function useTrofeoEvents() {
         rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, tz: e.tz, location: e.location,
           color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], reminders: e.reminders || [], updated_at: e.updated_at || null });
       }
-      void writeTrofeoEvents(JSON.stringify({ user: s.user.id, email: s.user.email ?? "", written: new Date().toISOString(), events: rows }))
+      void writeTrofeoEvents(JSON.stringify({ user: s.user.id, email: s.user.email ?? "", written: new Date().toISOString(), events: rows,
+        prefs: { multi_mark: settings.value.multiMark } }))
         .catch((err) => console.warn("eventi per Trofeo", err));
     };
     const t = setTimeout(write, 300);
     const iv = setInterval(write, 60000);         // anche senza modifiche, ogni minuto: Trofeo sa che l'app per PC e' aperta
     return () => { clearTimeout(t); clearInterval(iv); };
-  }, [s?.user.id, m, cs]);
+  }, [s?.user.id, m, cs, mm]);
 }
 
 function step(dir: number) {
@@ -202,6 +204,7 @@ function Overlays() {
           case "trofeo": return <TrofeoPage />;
           case "rem": return <RemSheet allDay={o.allDay} start={o.start} value={o.value} onPick={o.onPick} none={o.none} />;
           case "choice": return <ChoiceSheet title={o.title} options={o.options} value={o.value} onPick={o.onPick} danger={o.danger} />;
+          case "multimark": return <MultiMarkSheet />;
           case "calEdit": return <CalEditSheet id={o.id} />;
           case "confirm": return <ConfirmSheet title={o.title} text={o.text} ok={o.ok} danger={o.danger} onOk={o.onOk} />;
           case "shifts": return <ShiftsPage />;

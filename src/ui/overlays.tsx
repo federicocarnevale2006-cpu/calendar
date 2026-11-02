@@ -5,7 +5,7 @@ import { describeRule, expand, parseRule, ruleToString, uuid, type Cal, type Ev,
 import { APK_URL, APP_VERSION, EXE_URL, PALETTE, SUPABASE_KEY, SUPABASE_URL } from "../config";
 import {
   calById, cals, createDeviceKey, createShiftKey, isHoliday, deleteEvent, evColor, events, evMap, lastSync, pendingCount, saveCal, saveEvent, session, setSettings,
-  settings, signOut, supabase, syncError, syncState, scheduleSync, visibleCals,
+  settings, signOut, supabase, syncError, syncState, scheduleSync, visibleCals, setMultiMark, type MultiMark,
 } from "../store";
 import { autostart, autoUpdatePC, isAndroid, isTauri, nativePushStatus, openUrl, pcUpdate, readTrofeoLink, restartApp, update, writeTrofeoLink, type PushStatus } from "../platform";
 import { cursor, now, pop, push, replaceTop, selDay, showToast, closeAll } from "./state";
@@ -979,6 +979,76 @@ function PcUpdateRow() {
   );
 }
 
+// ---- widget: piu' eventi nello stesso giorno (scelta uguale su telefono e PC) ----------------------------------
+export const MULTI_LABEL: Record<MultiMark, [string, string]> = {
+  split: ["Cerchio diviso", "Il cerchio si divide nei colori degli eventi (fino a 3)"],
+  badge: ["Pallino in alto", "Pallino del secondo evento; con 3 o più eventi diventa «+2», «+3»"],
+  dots: ["Puntini sotto", "Un puntino per ogni altro evento sotto il cerchio"],
+};
+const MR = "#ef4444", MB = "#3b82f6", MG = "#22c55e";
+function slicePath(cx: number, cy: number, r: number, a0: number, a1: number) {
+  const p = (a: number) => [cx + r * Math.cos((a - 90) * Math.PI / 180), cy + r * Math.sin((a - 90) * Math.PI / 180)];
+  const [x0, y0] = p(a0), [x1, y1] = p(a1);
+  return `M${cx} ${cy}L${x0.toFixed(2)} ${y0.toFixed(2)}A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}Z`;
+}
+/** Disegnino di come appare il widget: un giorno con 2 eventi e uno con 3. */
+export function MultiPreview({ mode }: { mode: MultiMark }) {
+  const day = (cx: number, n: number, cols: string[]) => {
+    const cy = 20, r = 13;
+    const parts: any[] = [];
+    if (mode === "split") {
+      const k = Math.min(3, cols.length), step = 360 / k, off = k === 2 ? 45 : 0;
+      for (let i = 0; i < k; i++) parts.push(<path d={slicePath(cx, cy, r, off + i * step, off + (i + 1) * step)} fill={cols[i]} />);
+      for (let i = 0; i < k; i++) {
+        const a = (off + i * step - 90) * Math.PI / 180;
+        parts.push(<line x1={cx} y1={cy} x2={cx + r * Math.cos(a)} y2={cy + r * Math.sin(a)} stroke="var(--surface)" stroke-width="1.4" />);
+      }
+    } else {
+      parts.push(<circle cx={cx} cy={cy} r={r} fill={cols[0]} />);
+      if (mode === "badge" && cols.length === 2) {
+        parts.push(<circle cx={cx + r * 0.72} cy={cy - r * 0.72} r={6.4} fill="var(--surface)" />, <circle cx={cx + r * 0.72} cy={cy - r * 0.72} r={4.6} fill={cols[1]} />);
+      } else if (mode === "badge") {
+        const bx = cx + r * 0.8, by = cy - r * 0.78;
+        parts.push(<rect x={bx - 9.5} y={by - 6.6} width={19} height={13.2} rx={6.6} fill="var(--surface)" />,
+          <rect x={bx - 8} y={by - 5.2} width={16} height={10.4} rx={5.2} fill="#f5f5f7" />,
+          <text x={bx} y={by + 3.3} text-anchor="middle" font-size="8.5" font-weight="800" fill="#18181b">+{cols.length - 1}</text>);
+      } else {
+        const ex = cols.slice(1);
+        ex.forEach((c, i) => parts.push(<circle cx={cx + (i - (ex.length - 1) / 2) * 7} cy={cy + r + 5.5} r={2.6} fill={c} />));
+      }
+    }
+    parts.push(<text x={cx} y={cy + 4.6} text-anchor="middle" font-size="13" font-weight="800" fill="#fff">{n}</text>);
+    return parts;
+  };
+  return (
+    <svg class="mmprev" viewBox="0 0 96 44" width="96" height="44" aria-hidden="true">
+      {day(24, 4, [MR, MB])}{day(70, 5, [MR, MB, MG])}
+    </svg>
+  );
+}
+export function MultiMarkSheet() {
+  const cur = settings.value.multiMark;
+  return (
+    <>
+      <div class="scrim top" onClick={pop} />
+      <div class="sheet choicesheet mmsheet" role="dialog" aria-label="Più eventi nello stesso giorno">
+        <div class="grip" />
+        <div class="chtitle">Più eventi nello stesso giorno</div>
+        <div class="mmnote">Nei widget del telefono e di Trofeo LCD, quando i giorni sono cerchi colorati. Vale per tutti i tuoi dispositivi.</div>
+        <div class="chlist">
+          {(["badge", "split", "dots"] as const).map((m) => (
+            <button type="button" class={"chopt mmopt" + (m === cur ? " on" : "")} onClick={() => { pop(); if (m !== cur) setMultiMark(m); }}>
+              <MultiPreview mode={m} />
+              <span class="grow"><span class="mmlab">{MULTI_LABEL[m][0]}</span><span class="mmdesc">{MULTI_LABEL[m][1]}</span></span>
+              {m === cur && <Icon n="check" />}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function SettingsPage() {
   const st = settings.value;
   const [auto, setAuto] = useState<boolean | null>(null);
@@ -1000,6 +1070,8 @@ export function SettingsPage() {
           <div class="seg"><button class={st.weekStart === 1 ? "on" : ""} onClick={() => setSettings({ weekStart: 1 })}>Lunedì</button><button class={st.weekStart === 0 ? "on" : ""} onClick={() => setSettings({ weekStart: 0 })}>Domenica</button></div></div>
         <div class="row"><Icon n="list" /><div class="grow lab">Numeri delle settimane</div><Switch on={st.weekNumbers} onChange={(v) => setSettings({ weekNumbers: v })} /></div>
         <div class="row"><Icon n="cal" /><div class="grow"><div class="lab">Festività italiane</div><div class="val">Capodanno, Pasqua, 25 aprile, Natale… in rosso</div></div><Switch on={st.holidays} onChange={(v) => setSettings({ holidays: v })} /></div>
+        <button class="row click" onClick={() => push({ t: "multimark" })}><Icon n="cal" /><div class="grow"><div class="lab">Widget: più eventi in un giorno</div>
+          <div class="val">{MULTI_LABEL[st.multiMark][0]} · telefono e Trofeo LCD</div></div><Icon n="right" /></button>
         <div class="row"><Icon n="sun" /><div class="grow lab">Tema</div>
           <div class="seg">{(["system", "light", "dark"] as const).map((t) => <button class={st.theme === t ? "on" : ""} onClick={() => setSettings({ theme: t })}>{t === "system" ? "Auto" : t === "light" ? "Chiaro" : "Scuro"}</button>)}</div></div>
       </div>

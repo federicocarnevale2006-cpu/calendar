@@ -399,3 +399,10 @@ textarea.inp.code { display: block; width: calc(100% - 36px); resize: none; font
 .calsheet .palette { padding: 4px 18px 10px; }
 .chopt.danger { color: var(--danger); }
 .btn.dangerfill { background: var(--danger); color: #fff; }
+/* widget: piu' eventi nello stesso giorno */
+.mmnote { font-size: 13px; color: var(--muted); padding: 0 20px 8px; line-height: 1.4; }
+.mmopt { min-height: 64px; padding: 6px 12px; }
+.mmopt .mmprev { flex: none; }
+.mmlab { display: block; font-size: 15.5px; }
+.mmdesc { display: block; font-size: 12.5px; color: var(--muted); font-weight: 400; margin-top: 2px; line-height: 1.35; }
+.mmopt.on .mmdesc { color: color-mix(in srgb, var(--accent) 70%, var(--muted)); }

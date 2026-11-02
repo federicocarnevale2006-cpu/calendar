@@ -49,8 +49,11 @@ export interface Settings {
   defaultDuration: number;      // minuti
   view: "month" | "week" | "day" | "agenda" | "year";
   holidays: boolean;            // festivita' italiane
+  multiMark: MultiMark;         // widget: piu' eventi nello stesso giorno (uguale su tutti i dispositivi)
+  multiMarkDirty?: boolean;     // scelta fatta qui e non ancora salvata sul server
 }
-const SETTINGS_DEFAULT: Settings = { weekStart: 1, theme: "system", weekNumbers: false, defaultCal: null, defaultReminder: 15, defaultDuration: 60, view: "month", holidays: true };
+export type MultiMark = "split" | "badge" | "dots";
+const SETTINGS_DEFAULT: Settings = { weekStart: 1, theme: "system", weekNumbers: false, defaultCal: null, defaultReminder: 15, defaultDuration: 60, view: "month", holidays: true, multiMark: "badge" };
 function loadSettings(): Settings {
   try {
     return { ...SETTINGS_DEFAULT, ...JSON.parse(localStorage.getItem("calendario-settings") || "{}") };
@@ -346,6 +349,31 @@ async function dropMissing(table: "events" | "cals", seen: Set<string>) {
   }
 }
 
+// ---- impostazioni comuni a tutti i dispositivi (tabella user_settings) ----------------------------------------
+const MULTI_OK: MultiMark[] = ["split", "badge", "dots"];
+function applyServerPrefs(row: any) {
+  if (!row || settings.value.multiMarkDirty) return;          // scelta fatta qui non ancora inviata: vince quella
+  const mm = MULTI_OK.includes(row.multi_mark) ? (row.multi_mark as MultiMark) : "badge";
+  if (mm !== settings.value.multiMark) setSettings({ multiMark: mm });
+}
+/** Scelta dall'app (telefono o PC): vale per i widget di tutti i dispositivi. */
+export function setMultiMark(mm: MultiMark) {
+  setSettings({ multiMark: mm, multiMarkDirty: true });
+  scheduleSync(0);
+}
+async function syncPrefs(uid: string) {
+  if (settings.value.multiMarkDirty) {
+    const mm = settings.value.multiMark;
+    const { error } = await supabase.from("user_settings").upsert({ user_id: uid, multi_mark: mm, updated_at: new Date().toISOString() });
+    if (error) throw new Error(error.message);
+    if (settings.value.multiMark === mm) setSettings({ multiMarkDirty: false });
+    return;
+  }
+  const { data, error } = await supabase.from("user_settings").select("multi_mark").eq("user_id", uid).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (data) applyServerPrefs(data);
+}
+
 async function pull() {
   const okAt = await meta<number>("pulled_ok");
   const full = typeof okAt === "number" && Date.now() - okAt > RESYNC_MS;
@@ -386,6 +414,7 @@ export async function sync() {
     await takeNativeSent();
     await push(s.user.id);
     await pull();
+    await syncPrefs(s.user.id).catch((e) => console.warn("impostazioni:", e));
     syncState.value = "ok";
     syncError.value = "";
     lastSync.value = Date.now();
@@ -412,6 +441,9 @@ function subscribe(uid: string) {
       void mergeRows(table, [p.new]);
     });
   }
+  channel.on("postgres_changes" as any, { event: "*", schema: "public", table: "user_settings", filter: `user_id=eq.${uid}` }, (p: any) => {
+    if (p.eventType !== "DELETE") applyServerPrefs(p.new);
+  });
   channel.subscribe((status) => {
     if (status === "SUBSCRIBED") scheduleSync(0);              // dopo una riconnessione si recupera quello che si e' perso
   });

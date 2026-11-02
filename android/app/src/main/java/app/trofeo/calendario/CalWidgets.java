@@ -141,6 +141,43 @@ public final class CalWidgets {
         } finally {
             if (con != null) con.disconnect();
         }
+        fetchPrefs(ctx, base(p), key, p.getString("anon", ""));
+    }
+
+    static String base(SharedPreferences p) {
+        String b = p.getString("url", "");
+        return b.endsWith("/") ? b.substring(0, b.length() - 1) : b;
+    }
+
+    /** Impostazioni comuni a tutti i dispositivi (come mostrare piu' eventi nello stesso giorno): scelte anche dal PC. */
+    static void fetchPrefs(Context ctx, String base, String key, String anon) {
+        if (base.isEmpty() || key.isEmpty()) return;
+        HttpURLConnection con = null;
+        try {
+            con = (HttpURLConnection) new URL(base + "/rest/v1/rpc/device_prefs").openConnection();
+            con.setConnectTimeout(8000);
+            con.setReadTimeout(8000);
+            con.setRequestMethod("POST");
+            con.setDoOutput(true);
+            con.setRequestProperty("Content-Type", "application/json");
+            con.setRequestProperty("Accept", "application/json");
+            con.setRequestProperty("apikey", anon);
+            JSONObject body = new JSONObject();
+            body.put("p_key", key);
+            try (OutputStream os = con.getOutputStream()) { os.write(body.toString().getBytes("UTF-8")); }
+            if (con.getResponseCode() != 200) return;
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            try (InputStream is = con.getInputStream()) {
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
+            }
+            String mm = new JSONObject(bo.toString("UTF-8")).optString("multi_mark", "");
+            if (mm.equals("split") || mm.equals("badge") || mm.equals("dots")) prefs(ctx).edit().putString("multi", mm).apply();
+        } catch (Exception ignored) {
+        } finally {
+            if (con != null) con.disconnect();
+        }
     }
 
     // --------------------------------------------------------------------------------------- aggiornamento
@@ -500,22 +537,43 @@ public final class CalWidgets {
         /**
          * Widget basso: niente righe con i titoli. Cerchio pieno del colore dell'evento dietro il numero (pillola per gli eventi
          * di piu' giorni), come il widget di Trofeo LCD. Il cerchio si adatta all'altezza della riga: non tocca mai le altre.
+         * Piu' eventi nello stesso giorno (scelta nell'app, uguale su telefono e PC):
+         *  - "badge": pallino del secondo evento in alto a destra; con 3 o piu' eventi «+2», «+3»
+         *  - "split": cerchio diviso nei colori degli eventi (fino a 3); sulle pillole di piu' giorni si usa il pallino
+         *  - "dots":  un puntino per ogni altro evento sotto il cerchio (cerchi un po' piu' piccoli per fare posto)
          */
         void compactRow(Calendar ws, List<Bar> bars, List<List<CalData.Occ>> singles, Map<String, String> hol, float pad,
                         float y0, float cw, float rh, int month) {
-            float cy = y0 + rh / 2f;
-            float r = Math.min(Math.min(cw * 0.42f, rh * 0.45f), 13.5f * d);
+            String mode = prefs(ctx).getString("multi", "badge");
+            boolean dots = "dots".equals(mode), split = "split".equals(mode);
+            float dotR = 0, dotUp = 0, cy = y0 + rh / 2f, r = Math.min(Math.min(cw * 0.42f, rh * 0.45f), 13.5f * d);
+            if (dots) {
+                // posto per i puntini: il cerchio si rimpicciolisce al massimo del 20% (resta leggibile); se non basta,
+                // i puntini salgono sul bordo del cerchio (con un contorno si vedono lo stesso). Come Trofeo LCD
+                dotR = Math.max(1.6f * d, r * 0.19f);
+                float space = dotR * 2 + 2.5f * d;
+                r = Math.max(r * 0.8f, Math.min(r, (rh * 0.94f - space) / 2f));
+                dotUp = Math.max(0f, 2 * r + space - rh * 0.96f);
+                cy -= (space - dotUp) / 2f;
+            }
             float fs = Math.max(8f, Math.min(12.5f, r * 1.02f / sp));
-            boolean[] covered = new boolean[7];
+            boolean[] covered = new boolean[7], pill = new boolean[7];
             int[] col = new int[7];
             boolean[] outDay = new boolean[7];
             boolean[] isToday = new boolean[7];
+            List<List<Integer>> dayCols = new ArrayList<>();                 // tutti gli eventi del giorno, in ordine
             for (int i = 0; i < 7; i++) {
                 Calendar dd = (Calendar) ws.clone();
                 dd.add(Calendar.DAY_OF_MONTH, i);
                 outDay[i] = dd.get(Calendar.MONTH) != month;
                 isToday[i] = dd.get(Calendar.YEAR) == now.get(Calendar.YEAR) && dd.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR);
+                dayCols.add(new ArrayList<>());
             }
+            for (Bar br : bars) {                                             // prima quelli di tutto il giorno / piu' giorni
+                if (br.hol) continue;
+                for (int x = br.c0; x <= br.c1; x++) dayCols.get(x).add(br.color);
+            }
+            for (int i = 0; i < 7; i++) for (CalData.Occ o : singles.get(i)) dayCols.get(i).add(o.ev.color);
             p.setStyle(Paint.Style.FILL);
             // eventi di piu' giorni: una pillola (la prima corsia libera vince)
             for (Bar br : bars) {
@@ -525,21 +583,42 @@ public final class CalWidgets {
                 if (!free) continue;
                 boolean allOut = true;
                 for (int x = br.c0; x <= br.c1; x++) if (!outDay[x]) { allOut = false; break; }
-                p.setColor(allOut ? (br.color & 0x00FFFFFF) | 0x70000000 : br.color);
+                p.setColor(fade(br.color, allOut));
                 float x0 = pad + cw * (br.c0 + 0.5f) - r, x1 = pad + cw * (br.c1 + 0.5f) + r;
                 cv.drawRoundRect(new RectF(x0, cy - r, x1, cy + r), r, r, p);
-                for (int x = br.c0; x <= br.c1; x++) { covered[x] = true; col[x] = br.color; }
+                for (int x = br.c0; x <= br.c1; x++) { covered[x] = true; col[x] = br.color; pill[x] = br.c1 > br.c0; }
             }
-            // eventi di un giorno: cerchio
+            // giorni senza pillola: cerchio (diviso, nello stile «cerchio diviso»)
             for (int i = 0; i < 7; i++) {
-                if (covered[i] || singles.get(i).isEmpty()) continue;
-                int c = singles.get(i).get(0).ev.color;
-                p.setColor(outDay[i] ? (c & 0x00FFFFFF) | 0x70000000 : c);
-                cv.drawCircle(pad + cw * (i + 0.5f), cy, r, p);
+                List<Integer> dc = dayCols.get(i);
+                if (dc.isEmpty() || (covered[i] && pill[i])) continue;
+                float cx = pad + cw * (i + 0.5f);
+                int c = covered[i] ? col[i] : dc.get(0);
+                List<Integer> distinct = new ArrayList<>();
+                for (int k : dc) if (!distinct.contains(k)) distinct.add(k);
+                if (split && distinct.size() > 1) {
+                    int n = Math.min(3, distinct.size());
+                    float step = 360f / n, off = n == 2 ? 45f : 0f;
+                    RectF ov = new RectF(cx - r, cy - r, cx + r, cy + r);
+                    for (int k = 0; k < n; k++) {
+                        p.setColor(fade(distinct.get(k), outDay[i]));
+                        cv.drawArc(ov, -90 + off + k * step, step, true, p);
+                    }
+                    p.setColor(bg | 0xFF000000);                              // filo fra gli spicchi
+                    p.setStrokeWidth(Math.max(1f, 1.1f * d));
+                    for (int k = 0; k < n; k++) {
+                        double a = Math.toRadians(-90 + off + k * step);
+                        cv.drawLine(cx, cy, cx + (float) Math.cos(a) * r, cy + (float) Math.sin(a) * r, p);
+                    }
+                } else if (!covered[i]) {
+                    p.setColor(fade(c, outDay[i]));
+                    cv.drawCircle(cx, cy, r, p);
+                }
                 covered[i] = true;
                 col[i] = c;
             }
             // oggi e numeri
+            android.graphics.Rect tb = new android.graphics.Rect();
             for (int i = 0; i < 7; i++) {
                 Calendar dd = (Calendar) ws.clone();
                 dd.add(Calendar.DAY_OF_MONTH, i);
@@ -561,10 +640,57 @@ public final class CalWidgets {
                 else if (outDay[i]) c = faint;
                 else c = hol.containsKey(CalData.ymd(dd)) ? sun : dayColor(dd);
                 font(fs, isToday[i] || covered[i], c);
-                p.setTextAlign(Paint.Align.CENTER);
-                Paint.FontMetrics fm = p.getFontMetrics();
-                cv.drawText(String.valueOf(dd.get(Calendar.DAY_OF_MONTH)), cx, cy - (fm.ascent + fm.descent) / 2f, p);
+                p.setTextAlign(Paint.Align.LEFT);
+                String num = String.valueOf(dd.get(Calendar.DAY_OF_MONTH));
+                p.getTextBounds(num, 0, num.length(), tb);                  // centro sulla forma delle cifre, non sull'interlinea
+                cv.drawText(num, cx - tb.exactCenterX(), cy - tb.exactCenterY(), p);
+                // altri eventi dello stesso giorno
+                List<Integer> dc = dayCols.get(i);
+                if (dc.size() < 2) continue;
+                List<Integer> extra = new ArrayList<>(dc);
+                extra.remove(Integer.valueOf(col[i]));
+                if (extra.isEmpty()) continue;
+                if (split && !pill[i]) {
+                    List<Integer> distinct = new ArrayList<>();
+                    for (int k : dc) if (!distinct.contains(k)) distinct.add(k);
+                    if (distinct.size() > 1) continue;                    // gia' nel cerchio diviso
+                }
+                if (dots) {
+                    int n = Math.min(3, extra.size());
+                    float gap = dotR * 2.7f, dy = cy + r + dotR + 1.6f * d - dotUp;
+                    for (int k = 0; k < n; k++) {
+                        float ex = cx + (k - (n - 1) / 2f) * gap;
+                        if (dotUp > 0) {                                  // sul bordo del cerchio: contorno per staccarlo
+                            p.setColor(bg | 0xFF000000);
+                            cv.drawCircle(ex, dy, dotR + 1.1f * d, p);
+                        }
+                        p.setColor(fade(extra.get(k), outDay[i]));
+                        cv.drawCircle(ex, dy, dotR, p);
+                    }
+                } else if (extra.size() == 1) {                          // pallino del secondo evento in alto a destra
+                    float bx = cx + r * 0.72f, by = cy - r * 0.72f, br = Math.max(2.4f * d, r * 0.36f);
+                    p.setColor(bg | 0xFF000000);
+                    cv.drawCircle(bx, by, br + 1.4f * d, p);
+                    p.setColor(fade(extra.get(0), outDay[i]));
+                    cv.drawCircle(bx, by, br, p);
+                } else {                                                  // «+2», «+3»...
+                    String lab = "+" + extra.size();
+                    font(Math.max(6.5f, r * 0.55f / sp), true, 0xFF18181B);
+                    float tw = p.measureText(lab), bh = Math.max(9f * d, r * 0.78f), bw = Math.max(bh, tw + bh * 0.55f);
+                    float bx = cx + r * 0.8f, by = cy - r * 0.78f;
+                    p.setColor(bg | 0xFF000000);
+                    cv.drawRoundRect(new RectF(bx - bw / 2 - 1.4f * d, by - bh / 2 - 1.4f * d, bx + bw / 2 + 1.4f * d, by + bh / 2 + 1.4f * d), bh, bh, p);
+                    p.setColor(0xFFF5F5F7);
+                    cv.drawRoundRect(new RectF(bx - bw / 2, by - bh / 2, bx + bw / 2, by + bh / 2), bh / 2, bh / 2, p);
+                    p.setColor(0xFF18181B);
+                    p.getTextBounds(lab, 0, lab.length(), tb);
+                    cv.drawText(lab, bx - tb.exactCenterX(), by - tb.exactCenterY(), p);
+                }
             }
+        }
+
+        static int fade(int c, boolean out) {
+            return out ? (c & 0x00FFFFFF) | 0x70000000 : c;
         }
 
         // ---------------------------------------------------------------------------------- elenco

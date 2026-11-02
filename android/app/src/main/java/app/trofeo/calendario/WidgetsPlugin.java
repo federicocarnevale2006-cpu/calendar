@@ -27,6 +27,7 @@ public class WidgetsPlugin extends Plugin {
         if (call.hasOption("key")) e.putString("key", call.getString("key", ""));
         if (call.hasOption("url")) e.putString("url", call.getString("url", ""));
         if (call.hasOption("anon")) e.putString("anon", call.getString("anon", ""));
+        if (call.hasOption("multi")) e.putString("multi", call.getString("multi", "badge"));
         if (call.hasOption("weekStart")) {
             Integer ws = call.getInt("weekStart", 1);
             e.putInt("weekStart", ws == null ? 1 : ws);
