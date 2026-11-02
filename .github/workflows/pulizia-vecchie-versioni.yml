@@ -1,0 +1,24 @@
+# Da lanciare A MANO, una volta sola (Actions → «Pulizia vecchie versioni» → Run workflow).
+# Elimina le versioni da 1.0.1 a 1.0.25 e i loro tag: i loro APK ed exe contenevano l'indirizzo dei turni e l'APK era
+# firmato con la vecchia chiave (che era nel codice pubblico). Le versioni nuove non vengono toccate.
+name: Pulizia vecchie versioni
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pulizia:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Elimina le versioni 1.0.1 – 1.0.25 e i loro tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for n in $(seq 1 25); do
+            gh release delete "v1.0.$n" --yes --cleanup-tag && echo "eliminata v1.0.$n" || true
+            gh api -X DELETE "repos/$GH_REPO/git/refs/tags/v1.0.$n" >/dev/null 2>&1 && echo "tag v1.0.$n eliminato" || true
+          done
+          echo "Versioni rimaste:"; gh release list
