@@ -208,26 +208,58 @@ public final class CalWidgets {
         }
     }
 
+    /** Il widget per una misura precisa (in dp): immagine disegnata a quella misura + sfondo + tocchi. */
+    static RemoteViews buildViews(Context ctx, int type, float wdp, float hdp, float budget) {
+        float d = ctx.getResources().getDisplayMetrics().density;
+        float w = wdp * d, h = hdp * d;
+        float k = (float) Math.min(1.0, Math.sqrt(budget / (w * h * 4)));        // limite di memoria delle immagini dei widget
+        Bitmap bmp = Bitmap.createBitmap(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)), Bitmap.Config.ARGB_8888);
+        Canvas cv = new Canvas(bmp);
+        Painter pt = new Painter(ctx, cv, bmp.getWidth(), bmp.getHeight(), d * k);
+        if (type == MONTH) pt.month();
+        else if (type == AGENDA) pt.agenda();
+        else pt.today();
+        RemoteViews rv = new RemoteViews(ctx.getPackageName(), R.layout.widget_image);
+        // sfondo: forma a parte che riempie sempre il widget (stesso colore e trasparenza di prima)
+        rv.setInt(R.id.widget_bg, "setColorFilter", pt.bg | 0xFF000000);
+        rv.setInt(R.id.widget_bg, "setImageAlpha", pt.bg >>> 24);
+        rv.setImageViewBitmap(R.id.widget_img, bmp);
+        rv.setOnClickPendingIntent(R.id.widget_img, openApp(ctx, null, 100 + type));
+        if (type == TODAY) rv.setViewVisibility(R.id.widget_add, View.GONE);
+        else rv.setOnClickPendingIntent(R.id.widget_add, openApp(ctx, "calendario://nuovo", 200 + type));
+        return rv;
+    }
+
     static void updateOne(Context ctx, AppWidgetManager mgr, int id, int type) {
         try {
-            float[] sz = widgetSize(ctx, mgr.getAppWidgetOptions(id), type);
-            float d = ctx.getResources().getDisplayMetrics().density;
-            float w = sz[0] * d, h = sz[1] * d;
-            float k = (float) Math.min(1.0, Math.sqrt(5_500_000.0 / (w * h * 4)));   // limite di memoria delle immagini dei widget
-            Bitmap bmp = Bitmap.createBitmap(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)), Bitmap.Config.ARGB_8888);
-            Canvas cv = new Canvas(bmp);
-            Painter pt = new Painter(ctx, cv, bmp.getWidth(), bmp.getHeight(), d * k);
-            if (type == MONTH) pt.month();
-            else if (type == AGENDA) pt.agenda();
-            else pt.today();
-            RemoteViews rv = new RemoteViews(ctx.getPackageName(), R.layout.widget_image);
-            // sfondo: forma a parte che riempie sempre il widget (stesso colore e trasparenza di prima)
-            rv.setInt(R.id.widget_bg, "setColorFilter", pt.bg | 0xFF000000);
-            rv.setInt(R.id.widget_bg, "setImageAlpha", pt.bg >>> 24);
-            rv.setImageViewBitmap(R.id.widget_img, bmp);
-            rv.setOnClickPendingIntent(R.id.widget_img, openApp(ctx, null, 100 + type));
-            if (type == TODAY) rv.setViewVisibility(R.id.widget_add, View.GONE);
-            else rv.setOnClickPendingIntent(R.id.widget_add, openApp(ctx, "calendario://nuovo", 200 + type));
+            Bundle o = mgr.getAppWidgetOptions(id);
+            RemoteViews rv = null;
+            // Android 12+: si danno al launcher TUTTE le misure possibili (verticale e orizzontale) e sceglie lui quella giusta
+            // al momento, anche dopo una rotazione o un riavvio: il disegno non puo' piu' restare della misura sbagliata
+            if (o != null && android.os.Build.VERSION.SDK_INT >= 31) {
+                try {
+                    ArrayList<android.util.SizeF> list = o.getParcelableArrayList(AppWidgetManager.OPTION_APPWIDGET_SIZES);
+                    if (list != null && !list.isEmpty()) {
+                        List<android.util.SizeF> uniq = new ArrayList<>();
+                        for (android.util.SizeF s : list) {
+                            if (s == null || s.getWidth() <= 0 || s.getHeight() <= 0) continue;
+                            boolean dup = false;
+                            for (android.util.SizeF u : uniq) if (Math.abs(u.getWidth() - s.getWidth()) < 1 && Math.abs(u.getHeight() - s.getHeight()) < 1) dup = true;
+                            if (!dup && uniq.size() < 4) uniq.add(s);
+                        }
+                        if (!uniq.isEmpty()) {
+                            Map<android.util.SizeF, RemoteViews> map = new HashMap<>();
+                            float budget = 5_500_000f / uniq.size();
+                            for (android.util.SizeF s : uniq) map.put(s, buildViews(ctx, type, s.getWidth(), s.getHeight(), budget));
+                            rv = new RemoteViews(map);
+                        }
+                    }
+                } catch (Exception ignored) { rv = null; }
+            }
+            if (rv == null) {
+                float[] sz = widgetSize(ctx, o, type);
+                rv = buildViews(ctx, type, sz[0], sz[1], 5_500_000f);
+            }
             mgr.updateAppWidget(id, rv);
         } catch (Exception ignored) { }
     }
