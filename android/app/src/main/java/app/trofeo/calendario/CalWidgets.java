@@ -73,6 +73,7 @@ public final class CalWidgets {
                     if (e.title.isEmpty()) e.title = "(senza titolo)";
                     e.location = o.isNull("location") ? "" : o.optString("location", "");
                     e.allDay = o.optBoolean("all_day", false);
+                    e.main = o.optBoolean("main", false);
                     e.startUtc = CalData.parseIso(o.getString("start_at"));
                     e.endUtc = CalData.parseIso(o.getString("end_at"));
                     e.rrule = o.isNull("rrule") ? null : o.optString("rrule", null);
@@ -106,7 +107,7 @@ public final class CalWidgets {
     static void maybeFetch(Context ctx) {
         SharedPreferences p = prefs(ctx);
         String key = p.getString("key", "");
-        if (key.isEmpty() || System.currentTimeMillis() - p.getLong("fetched", 0) < 20 * 60000L) return;
+        if (key.isEmpty() || System.currentTimeMillis() - p.getLong("fetched", 0) < 10 * 60000L) return;
         HttpURLConnection con = null;
         try {
             SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT);
@@ -127,7 +128,8 @@ public final class CalWidgets {
             con.setRequestProperty("Accept", "application/json");
             con.setRequestProperty("apikey", p.getString("anon", ""));
             try (OutputStream os = con.getOutputStream()) { os.write(body.toString().getBytes("UTF-8")); }
-            if (con.getResponseCode() != 200) return;
+            int code = con.getResponseCode();
+            if (code != 200) { p.edit().putString("fetch_note", "errore " + code + " alle " + System.currentTimeMillis()).apply(); return; }
             ByteArrayOutputStream bo = new ByteArrayOutputStream();
             try (InputStream is = con.getInputStream()) {
                 byte[] buf = new byte[8192];
@@ -136,8 +138,9 @@ public final class CalWidgets {
             }
             String txt = bo.toString("UTF-8");
             new JSONArray(txt);                                          // controllo: deve essere un elenco
-            p.edit().putString("events", txt).putLong("fetched", System.currentTimeMillis()).apply();
-        } catch (Exception ignored) {
+            p.edit().putString("events", txt).putLong("fetched", System.currentTimeMillis()).putString("fetch_note", "ok").apply();
+        } catch (Exception ex) {
+            p.edit().putString("fetch_note", "eccezione " + ex.getClass().getSimpleName()).apply();
         } finally {
             if (con != null) con.disconnect();
         }
@@ -191,6 +194,7 @@ public final class CalWidgets {
                 if (fetch) maybeFetch(app);
                 updateAll(app);
                 scheduleMidnight(app);
+                scheduleSync(app);
                 CalReminders.reschedule(app);                            // promemoria anche ad app chiusa
                 CalReminders.ensureFetchJob(app);
             } catch (Exception ignored) {
@@ -307,6 +311,20 @@ public final class CalWidgets {
         }
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return PendingIntent.getActivity(ctx, req, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /**
+     * Rilettura degli eventi ad app chiusa (riposi dalla mail, eventi dal PC): ogni 15 minuti, anche con il telefono a riposo.
+     * Il lavoro periodico di Android (FetchJob) da solo viene rimandato o fermato da molti telefoni per risparmiare batteria:
+     * questa sveglia lo affianca e si riprogramma da sola a ogni giro.
+     */
+    static void scheduleSync(Context ctx) {
+        try {
+            AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+            Intent i = new Intent(ctx, WidgetTick.class);
+            PendingIntent pi = PendingIntent.getBroadcast(ctx, 8, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            if (am != null) am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 15L * 60000L, pi);
+        } catch (Exception ignored) { }
     }
 
     /** Subito dopo mezzanotte il widget passa al giorno nuovo (sveglia non esatta: nessun permesso speciale). */
@@ -472,7 +490,7 @@ public final class CalWidgets {
                 Calendar dd = (Calendar) ws.clone();
                 dd.add(Calendar.DAY_OF_MONTH, i);
                 String hn = hol.get(CalData.ymd(dd));
-                if (hn != null) spans.add(new Object[]{i, i, sun, hn, Boolean.TRUE});
+                if (hn != null) spans.add(new Object[]{i, i, sun, hn, Boolean.TRUE, Boolean.FALSE});
             }
             for (CalData.Occ o : occ) {
                 boolean in = (o.start < b && o.end > a) || (o.start == o.end && o.start >= a && o.start < b);
@@ -482,7 +500,7 @@ public final class CalWidgets {
                 int c0 = Math.max(0, CalData.dayDiff(ws, s));
                 int c1 = Math.min(6, CalData.dayDiff(ws, last));
                 boolean multi = o.allDay || c1 > CalData.dayDiff(ws, CalData.local(o.start));
-                if (multi) spans.add(new Object[]{c0, Math.max(c0, c1), o.ev.color, o.ev.title, Boolean.FALSE});
+                if (multi) spans.add(new Object[]{c0, Math.max(c0, c1), o.ev.color, o.ev.title, Boolean.FALSE, o.ev.main});
                 else if (c0 >= 0 && c0 < 7) singles.get(c0).add(o);
             }
             for (Object[] s : spans) {
@@ -494,7 +512,7 @@ public final class CalWidgets {
                     lane++;
                 }
                 for (int x = c0; x <= c1; x++) taken[lane][x] = true;
-                bars.add(new Bar(c0, c1, lane, (Integer) s[2], (String) s[3], (Boolean) s[4]));
+                bars.add(new Bar(c0, c1, lane, (Integer) s[2], (String) s[3], (Boolean) s[4], (Boolean) s[5]));
             }
             if (maxLines < 1) {                                          // poco spazio: cerchi colorati dietro i numeri
                 compactRow(ws, bars, singles, hol, pad, y0, cw, rh, month);
@@ -560,9 +578,9 @@ public final class CalWidgets {
         static final class Bar {
             final int c0, c1, lane, color;
             final String title;
-            final boolean hol;
-            Bar(int c0, int c1, int lane, int color, String title, boolean hol) {
-                this.c0 = c0; this.c1 = c1; this.lane = lane; this.color = color; this.title = title; this.hol = hol;
+            final boolean hol, main;
+            Bar(int c0, int c1, int lane, int color, String title, boolean hol, boolean main) {
+                this.c0 = c0; this.c1 = c1; this.lane = lane; this.color = color; this.title = title; this.hol = hol; this.main = main;
             }
         }
 
@@ -601,15 +619,32 @@ public final class CalWidgets {
                 isToday[i] = dd.get(Calendar.YEAR) == now.get(Calendar.YEAR) && dd.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR);
                 dayCols.add(new ArrayList<>());
             }
+            boolean[] hasMain = new boolean[7];                               // «evento principale del giorno»: il suo colore vince
+            int[] mainCol = new int[7];
+            for (Bar br : bars) {
+                if (br.hol || !br.main) continue;
+                for (int x = br.c0; x <= br.c1; x++) if (!hasMain[x]) { hasMain[x] = true; mainCol[x] = br.color; }
+            }
+            for (int i = 0; i < 7; i++) for (CalData.Occ o : singles.get(i)) if (o.ev.main && !hasMain[i]) { hasMain[i] = true; mainCol[i] = o.ev.color; }
             for (Bar br : bars) {                                             // prima quelli di tutto il giorno / piu' giorni
                 if (br.hol) continue;
                 for (int x = br.c0; x <= br.c1; x++) dayCols.get(x).add(br.color);
             }
             for (int i = 0; i < 7; i++) for (CalData.Occ o : singles.get(i)) dayCols.get(i).add(o.ev.color);
+            for (int i = 0; i < 7; i++) {
+                if (!hasMain[i]) continue;
+                List<Integer> dcm = dayCols.get(i);
+                dcm.remove(Integer.valueOf(mainCol[i]));
+                dcm.add(0, mainCol[i]);
+            }
             p.setStyle(Paint.Style.FILL);
-            // eventi di piu' giorni: una pillola (la prima corsia libera vince)
-            for (Bar br : bars) {
+            // eventi di piu' giorni: una pillola (la prima corsia libera vince); quelli principali per primi
+            List<Bar> order = new ArrayList<>();
+            for (Bar br : bars) if (br.main) order.add(br);
+            for (Bar br : bars) if (!br.main) order.add(br);
+            for (Bar br : order) {
                 if (br.hol) continue;
+                if (br.c0 == br.c1 && hasMain[br.c0] && !br.main) continue;   // un altro evento e' il principale di quel giorno
                 boolean free = true;
                 for (int x = br.c0; x <= br.c1; x++) if (covered[x]) { free = false; break; }
                 if (!free) continue;

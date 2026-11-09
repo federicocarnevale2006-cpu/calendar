@@ -189,7 +189,7 @@ export function newEvent(start: Date, allDay = false): Ev {
 // ---- sincronizzazione ---------------------------------------------------------------------------------------
 const TABLE = { events: "events", cals: "calendars" } as const;
 const COLS = {
-  events: ["id", "user_id", "calendar_id", "title", "all_day", "start_at", "end_at", "tz", "location", "notes", "color", "rrule", "exdates", "reminders", "deleted"],
+  events: ["id", "user_id", "calendar_id", "title", "all_day", "start_at", "end_at", "tz", "location", "notes", "color", "rrule", "exdates", "reminders", "deleted", "main"],
   cals: ["id", "user_id", "name", "color", "visible", "sort", "deleted"],
 };
 let syncing = false, again = false, timer: ReturnType<typeof setTimeout> | null = null;
@@ -231,7 +231,7 @@ async function push(uid: string) {
         const r = await d.get(table, it.v.id);
         if (!r) continue;
         const o: Record<string, unknown> = {};
-        for (const c of COLS[table]) o[c] = c === "user_id" ? uid : r[c];
+        for (const c of COLS[table]) o[c] = c === "user_id" ? uid : c === "main" ? !!r.main : r[c];
         rows.push(o);
       }
       const failed = new Map<string, string>();
@@ -281,7 +281,7 @@ function mirror(): Promise<void> {
       const r = await d.get(v.table, v.id);
       if (!r) continue;
       const row: Record<string, unknown> = {};
-      for (const c of COLS[v.table as "events" | "cals"]) if (c !== "user_id") row[c] = r[c] ?? null;
+      for (const c of COLS[v.table as "events" | "cals"]) if (c !== "user_id") row[c] = c === "main" ? !!r.main : (r[c] ?? null);
       ops.push({ k, t: v.table, seq: v.seq, row });
     }
     await nativePending(ops);

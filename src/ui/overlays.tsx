@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { addDays, cap, DAYS_SHORT, hm, localDateToUtcIso, parseYmd, startOfDay, utcDateToLocal, ymd } from "../date";
 import { describeRule, expand, parseRule, ruleToString, uuid, type Ev, type Occ, type Rule } from "../model";
 import { PALETTE } from "../config";
-import { calById, isHoliday, deleteEvent, evColor, events, evMap, saveCal, saveEvent, setSettings, settings, visibleCals } from "../store";
+import { calById, isHoliday, deleteEvent, evColor, events, evMap, occurrences, saveCal, saveEvent, setSettings, settings, visibleCals } from "../store";
 import { cursor, now, pop, push, replaceTop, selDay, showToast, closeAll } from "./state";
 import { Icon } from "./icons";
 import { MiniMonth } from "./views";
@@ -42,6 +42,7 @@ export function Detail({ occ }: { occ: Occ }) {
           {ev.reminders.length > 0 && <div class="row"><Icon n="bell" /><div class="grow lab">{ev.reminders.slice().sort((a, b) => a - b).map((m) => remLabel(m, ev.all_day)).join(", ")}</div></div>}
           {ev.location && <div class="row"><Icon n="place" /><div class="grow lab">{ev.location}</div></div>}
           {ev.notes && <div class="row" style={{ alignItems: "flex-start" }}><Icon n="notes" /><div class="grow lab" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{ev.notes}</div></div>}
+          {ev.main && <div class="row"><Icon n="check" /><div class="grow lab">Evento principale del giorno</div></div>}
           {cal && <div class="row"><Icon n="cal" /><div class="grow lab">{cal.name}</div><span class="cdot" style={{ background: cal.color }} /></div>}
           {isHoliday(ev) && <div class="row"><Icon n="cal" /><div class="grow lab">Festività nazionale</div><span class="cdot" style={{ background: o.color }} /></div>}
           <div class="row"><Icon n="clock" /><div class="grow lab">{dday(o.start)}</div></div>
@@ -220,6 +221,7 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
   const [ed, setEd] = useState(toLocalInput(e0));
   const [calId, setCalId] = useState(ev.calendar_id);
   const [color, setColor] = useState<string | null>(ev.color);
+  const [main, setMain] = useState(!!ev.main);
   const [rule, setRule] = useState<Rule | null>(parseRule(ev.rrule));
   const [rem, setRem] = useState<number[]>(ev.reminders);
   const [loc, setLoc] = useState(ev.location);
@@ -248,7 +250,7 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
   const save = async () => {
     if (bad) return;
     const row: Ev = {
-      ...ev, title: title.trim(), all_day: allDay, calendar_id: calId, color, location: loc.trim(), notes: notes.trim(),
+      ...ev, title: title.trim(), all_day: allDay, calendar_id: calId, color, main, location: loc.trim(), notes: notes.trim(),
       rrule: rule ? ruleToString(rule) : null, reminders: [...new Set(rem)].sort((a, b) => a - b),
       start_at: allDay ? localDateToUtcIso(start) : start.toISOString(),
       end_at: allDay ? localDateToUtcIso(end) : end.toISOString(),
@@ -267,6 +269,15 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
       }
     }
     await saveEvent(row);
+    if (main) {                                                          // uno solo per giorno: gli altri «principali» degli stessi giorni si tolgono
+      const d0 = startOfDay(start);
+      const others = new Set<string>();
+      for (const x of occurrences(d0, addDays(startOfDay(end), 1))) if (x.ev.main && x.ev.id !== row.id && !x.ev.deleted) others.add(x.ev.id);
+      for (const id of others) {
+        const o = evMap.value.get(id);
+        if (o) await saveEvent({ ...o, main: false });
+      }
+    }
     closeAll();
     if (!selDay.value || startOfDay(selDay.value).getTime() !== startOfDay(start).getTime()) {
       if (settings.value.view === "month") selDay.value = startOfDay(start);
@@ -298,6 +309,7 @@ export function Editor({ ev, isNew, occ, scope }: { ev: Ev; isNew: boolean; occ?
       </div>
       <div class="card">
         <div class="row"><Icon n="clock" /><div class="grow lab">Tutto il giorno</div><Switch on={allDay} label="Tutto il giorno" onChange={setAllDay} /></div>
+        <div class="row"><Icon n="check" /><div class="grow"><div class="lab">Evento principale del giorno</div><div class="val">Il widget usa il suo colore per questo giorno</div></div><Switch on={main} label="Evento principale del giorno" onChange={setMain} /></div>
         <div class="row">
           <div style={{ width: "24px" }} />
           <div class="grow"><div class="val" style={{ marginBottom: "6px" }}>Inizio</div>

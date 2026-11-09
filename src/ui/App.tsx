@@ -111,7 +111,7 @@ function useWidgets() {
         const c = calById.value.get(e.calendar_id || "");
         if (c && (c.deleted || !c.visible)) continue;
         if (!e.rrule && new Date(e.end_at).getTime() < cut) continue;
-        rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], location: e.location, reminders: e.reminders || [] });
+        rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], location: e.location, reminders: e.reminders || [], main: !!e.main });
       }
       const y = new Date().getFullYear();
       void pushWidgets({ events: JSON.stringify(rows), holidays: JSON.stringify(hol ? holidaysRange(y - 1, y + 2) : {}), weekStart: ws, multi: mm });
@@ -135,7 +135,7 @@ function useTrofeoEvents() {
         if (c && (c.deleted || !c.visible)) continue;
         if (!e.rrule && new Date(e.end_at).getTime() < cut) continue;
         rows.push({ id: e.id, title: e.title, all_day: e.all_day, start_at: e.start_at, end_at: e.end_at, tz: e.tz, location: e.location,
-          color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], reminders: e.reminders || [], updated_at: e.updated_at || null });
+          color: evColor(e), rrule: e.rrule, exdates: e.exdates || [], reminders: e.reminders || [], main: !!e.main, updated_at: e.updated_at || null });
       }
       void writeTrofeoEvents(JSON.stringify({ user: s.user.id, email: s.user.email ?? "", written: new Date().toISOString(), events: rows,
         prefs: { multi_mark: settings.value.multiMark } }))

@@ -20,7 +20,7 @@ public final class CalData {
 
     public static final class Event {
         public String id = "", title = "", location = "", rrule = null;
-        public boolean allDay;
+        public boolean allDay, main;           // main: «evento principale del giorno» (il suo colore vince nel widget basso)
         public long startUtc, endUtc;          // istanti (ms); per «tutto il giorno» mezzanotte UTC del primo e dell'ultimo giorno
         public int color = 0xFF3B82F6;
         public Set<String> exdates = new HashSet<>();

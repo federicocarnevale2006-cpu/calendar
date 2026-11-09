@@ -27,6 +27,7 @@ export interface Ev {
   exdates: string[];         // date locali 'YYYY-MM-DD' delle ripetizioni tolte
   reminders: number[];       // minuti prima dell'inizio
   deleted: boolean;
+  main?: boolean;            // «evento principale del giorno»: il suo colore e' quello del giorno nei widget
   updated_at?: string;
 }
 
